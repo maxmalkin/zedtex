@@ -1,6 +1,6 @@
 # ZedTeX
 
-A language-server extension for official Zed: real TeX packages, page-image previews, Markdown math, and notebook HTML/PDF export.
+A language-server extension for official Zed: real TeX packages, page-image previews, Markdown math, notebook HTML/PDF export, and Markdown and math highlighting in notebook scripts.
 
 **Development status:** native renderer bundles pass actual TeX, Markdown, executed notebook HTML/PDF, and LSP checks on Windows x64, Linux x64, and Intel/Apple Silicon macOS. Releases download automatically through the extension API. Registry publication is pending.
 
@@ -9,6 +9,32 @@ A language-server extension for official Zed: real TeX packages, page-image prev
 Once the registry submission is accepted, install **ZedTeX** from Zed's Extensions UI. The extension downloads its matching native renderer on first use, using Zed's extension API. Python and a full TeX distribution will not need to be installed separately. Real TeX packages are fetched and cached by Tectonic as needed.
 
 The extension adds a supplementary language server for LaTeX, Markdown, Python and notebook JSON. It recognizes `.ipynb` as **Jupyter Notebook**, reusing Zed's built-in JSON grammar. Files explicitly set to **JSON** also work. `.tex` recognition comes from the existing **LaTeX** language extension, also installed through Zed’s Extensions UI. It keeps existing language servers in place. It does not replace Zed's native renderers or add a PDF viewer.
+
+## Notebook script highlighting
+
+Zed cannot extend its built-in Python highlighting from an extension. So the server sends LSP semantic tokens for the Markdown cells of Python notebook scripts, and for the math inside them. The file stays plain Python, so ruff and pyright keep working. For the same reason the extension does not change `languages`, `language_ids` or the `languages/` folder.
+
+The user must turn on one Zed setting, because Zed ships it off and an extension cannot change it:
+
+```json
+"languages": { "Python": { "semantic_tokens": "combined" } }
+```
+
+This also turns on semantic tokens from other Python servers, such as pyright, which can change some Python colours. Math in `.md` files is coloured by Zed itself when the LaTeX extension is installed.
+
+How it works:
+
+- The server answers `textDocument/semanticTokens/full` only. Zed never asks for ranges, and work is cached per cell, so there is no delta.
+- It answers only for local `.py` files, from the open buffer in memory, not from disk. Every other document gets an empty result.
+- `highlight.py` builds the tokens. Text with no Markdown cell returns an empty result at once. Each cell is cached.
+- The handler runs the tokenizer in a worker thread. It does not use the preview or export locks, so tokens never wait for a preview or an export, and they never delay one.
+- If the tokenizer fails, the server returns an empty result instead of an error.
+
+Limits:
+
+- Percent format only: `# %% [markdown]` and `# %% [md]` cells, with a `#` comment body or a triple-quoted body (`"""` or `'''`, with an optional `r` prefix).
+- Not the light or sphinx Jupytext formats. Not `.ipynb`, which stays JSON.
+- Colours come from the theme's standard token styles. There are no custom colours.
 
 ## Preview
 
@@ -48,7 +74,7 @@ PDF export reuses Zed's shared Node runtime rather than downloading another copy
 
 ## Resource use
 
-Renderer 0.1.4 downloads are approximately 57 MiB on Windows x64, 69 MiB on Linux x64, 63 MiB on Apple Silicon, and 65 MiB on Intel macOS. The bundles exclude the duplicate Node executable and unused Jedi completion, ipykernel, and Tk components. Release ZIPs use maximum standard DEFLATE compression.
+Renderer 0.1.4 downloads were approximately 57 MiB on Windows x64, 69 MiB on Linux x64, 63 MiB on Apple Silicon, and 65 MiB on Intel macOS. The bundles exclude the duplicate Node executable and unused Jedi completion, ipykernel, and Tk components. Release ZIPs use maximum standard DEFLATE compression. Renderer 0.2.0 adds one small Python module; its download sizes have not been measured separately.
 
 These sizes exclude Zed's shared Node runtime, TeX package caches, and any fallback browser download. Zed can download Node if it is not already available. Notebook code still runs in the user's registered kernel; removing ipykernel from the renderer does not remove notebook execution support.
 
@@ -80,15 +106,34 @@ Then select the local clone from Zed’s **Install Dev Extension** dialog. If in
 
 To update a dev install, pull the repository and select it again with **Install Dev Extension**. Run the preview action again to refresh older generated files.
 
-Run `python -m unittest -v test_regressions` for the 50 fast regressions covering embedded PNG/SVG transport, reference deduplication, escaped paths, Markdown preservation, source cleanliness, cache limits and reuse, concurrent writes, preview/export isolation, shared Node selection, notebook recognition, code actions, save coalescing, and opening errors. These run on Linux, Windows, and macOS for pushes and pull requests.
+Run `python -m unittest -v test_regressions test_highlight` for the 141 fast regressions covering embedded PNG/SVG transport, reference deduplication, escaped paths, Markdown preservation, source cleanliness, cache limits and reuse, concurrent writes, preview/export isolation, shared Node selection, notebook recognition, code actions, save coalescing, opening errors, notebook Markdown and math tokens, and the semantic token handler. These run on Linux, Windows, and macOS for pushes and pull requests.
 
-`python check.py` exercises real local TeX packages, changed-page/equation reuse, unchanged-file timestamps, failure retention, and executed notebook HTML/PDF exports. It needs Tectonic and a registered Python Jupyter kernel. Every renderer release runs both suites plus `python check_bundle.py`, which tests the frozen executable, LSP previews, and subprocess notebook exports through LSP, on all four supported platform targets. Bundle checks verify PDF export with both shared-runtime and standalone Node paths, and reject accidentally bundled Node, Jedi, ipykernel, or Tk components. The workflow publishes only after every target passes.
+`python check.py` exercises real local TeX packages, changed-page/equation reuse, unchanged-file timestamps, failure retention, and executed notebook HTML/PDF exports. It needs Tectonic and a registered Python Jupyter kernel. Every renderer release runs both suites plus `python check_bundle.py`, which tests the frozen executable, LSP previews, semantic tokens, and subprocess notebook exports through LSP, on all four supported platform targets. Bundle checks verify PDF export with both shared-runtime and standalone Node paths, and reject accidentally bundled Node, Jedi, ipykernel, or Tk components. The workflow publishes only after every target passes.
+
+To run a local or unreleased server instead of the download, set the `binary` path for the `latex-rendering` language server in your Zed settings. This is useful until a release is published, because a dev extension looks for the renderer that its pinned `backend-vX.Y.Z` tag points at. Install the dependencies once in a virtual environment with `python -m pip install .`, then point Zed at that Python and at `zed_latex.py` from your clone:
+
+```json
+"lsp": {
+  "latex-rendering": {
+    "binary": {
+      "path": "/path/to/zedtex/.venv/bin/python",
+      "arguments": ["/path/to/zedtex/zed_latex.py", "serve"]
+    }
+  }
+}
+```
+
+On Windows, write paths with forward slashes, like `C:/path/to/zedtex/.venv/Scripts/python.exe`. A frozen bundle works too: set only `path` to `dist/latex-rendering/latex-rendering`. When `arguments` is missing, the extension passes `serve`. The extension still sets `PLAYWRIGHT_NODEJS_PATH` to Zed's Node runtime. Restart the language server after each change to the Python files. Remove the setting to go back to the downloaded renderer.
+
+Release order: first run the **Renderer bundles** workflow, which publishes the `backend-vX.Y.Z` release. Only then publish an extension version whose `src/lib.rs` points at that tag, or the extension cannot download its renderer. Keep these in step: the backend version in `src/lib.rs`, `server.py`, `pyproject.toml` and `release.yml`, and the extension version in `extension.toml`.
 
 `cargo build --release --target wasm32-wasip2` builds the Zed extension. Native server bundles are built separately for each supported OS/architecture, then downloaded by the extension; they are not bundled into the extension registry archive.
 
 The Python renderer, regression checks, and `package_bundle.py` are maintained here so releases can be reproduced and tested. Zed packages only the compiled extension, manifest, language files, and snippets; development scripts and documentation assets are not installed with it.
 
 ## Troubleshooting
+
+No colours in the Markdown cells of a notebook script: check that `"semantic_tokens": "combined"` is set for Python (see above), that the file ends in `.py`, and that the cell starts with `# %% [markdown]` or `# %% [md]`. Then run **editor: restart language server**. Other cell formats are not coloured.
 
 If the action menu does not appear after installing or reloading, click another line in the original source file. If needed, run **editor: restart language server**, wait for startup, then move the cursor again. `.ipynb` files should show **Jupyter Notebook** or **JSON** in the status bar; reload the extension if they show **Unknown**.
 
