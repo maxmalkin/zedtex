@@ -4,6 +4,7 @@ import time
 import unittest
 from unittest import mock
 
+import jupytext
 import mistune
 
 import highlight
@@ -619,6 +620,72 @@ class SpeedTests(unittest.TestCase):
         for name, text in cases.items():
             with self.subTest(name=name):
                 self.assert_fast_and_valid(text)
+
+
+class JupytextTests(unittest.TestCase):
+    MARKERS = [
+        "# %% [markdown]", "# %% [md]", "# %% Title [markdown]", "#  %%   [markdown]", "    # %% [markdown]",
+        "\t# %% [md]", "# %%", "# %% [raw]", "# %%% [md]", "# %% [markdown] tags=[\"x\"]", "# %%[markdown]", "# %%md",
+        "# %% [Markdown]", "# %% title", "# %% [md] Title words", "#%% [markdown]", "# %%\t[markdown]",
+        "#\t%%\t[md]", "# %% [raw] [md]", "# %% [markdown] [raw]", "# %% [md]  ", "# %%  ", "# %%%% [md]",
+        "# % % [md]", "#%%", "# %%\u00a0[md]", "# In[1]:", "# <codecell>",
+    ]
+    BODIES = [
+        "{n} text", "# {n} text", "#{n} text", "#", "", "   ", "# ", "{n} `code`", "# {n} ```", "# {n} ```python",
+        "# {n} ~~~", "{n} ```", "{n} ~~~", "# ````", "# ~~~~", "# ```  ", "#    ```", "#  ```", "\"\"\"{n}", "{n} '''",
+        "# {n} \"\"\"", "r\"\"\"{n}", "R'''{n}", "# %% {n} inner", "# %% [markdown] {n}", "    # {n} indented",
+        "  # {n} two", "x = {n}", "def f{n}():", "{n} don't", "# {n} don't", "x = \"\"\"{n}", "    \"\"\"", "# %%",
+        "{n} \"\"\" x \"\"\"", "{n} '''x'''", "# {n} # %% not", "\t# {n}", "# {n} $x$ *a*", "{n} \\\"\"\"",
+        "{n} '\"\"\"'", "{n} \"'''\"", "'''", "\"\"\"", "# '''", "# \"\"\"", "{n} # \"\"\"", "# {n} \u00e9\U0001F600",
+        "x = '{n}", "'{n}", "\"{n}", "{n} \\", "# {n} \\", "\ufeff# {n}", "{n}\x00 *a*",
+    ]
+    LINE_NUMBER = re.compile(r"@(\d+)@")
+
+    def generated_lines(self, rng):
+        lines = []
+        for number in range(rng.randint(1, 16)):
+            if rng.random() < 0.3:
+                marker = rng.choice(self.MARKERS)
+                lines.append(marker if "In[" in marker or "<code" in marker else f"{marker} @{number}@")
+            else:
+                lines.append(rng.choice(self.BODIES).format(n=f"@{number}@"))
+        return lines
+
+    def highlight_lines(self, text, lines):
+        found = {}
+        for first_line, body in highlight.markdown_bodies(text):
+            for body_line, content, _ in highlight.body_entries(body.split("\n"), True):
+                tag = self.LINE_NUMBER.search(lines[first_line + body_line]) if first_line + body_line < len(lines) else None
+                if tag:
+                    found[tag.group(1)] = content
+        return found
+
+    def jupytext_lines(self, text):
+        found = {}
+        for cell in jupytext.reads(text, fmt="py:percent").cells:
+            for line in cell.source.split("\n") if cell.cell_type == "markdown" else []:
+                tag = self.LINE_NUMBER.search(line)
+                if tag:
+                    found.setdefault(tag.group(1), line)
+        return found
+
+    def test_markdown_cell_lines_and_text_match_jupytext(self):
+        rng = random.Random(20240615)
+        with_cells = 0
+        for _ in range(1500):
+            lines = self.generated_lines(rng)
+            ending = rng.choice(["\n", "\n", "\r\n"])
+            text = ending.join(lines) + ending
+            expected = self.jupytext_lines(text)
+            with_cells += bool(expected)
+            with self.subTest(text=text):
+                self.assertEqual(self.highlight_lines(text.replace("\r\n", "\n"), lines), expected)
+        self.assertGreater(with_cells, 500)
+
+    def test_a_leading_bom_is_ignored_unlike_jupytext(self):
+        text = "\ufeff# %% [markdown]\n# **b**\n"
+        self.assertEqual(tokens_of(text), [(1, 2, 5, "enumMember")])
+        self.assertEqual([cell.cell_type for cell in jupytext.reads(text, fmt="py:percent").cells], ["code"])
 
 
 class CacheTests(unittest.TestCase):
