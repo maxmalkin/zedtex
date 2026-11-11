@@ -102,4 +102,4 @@ For a shorter palette search, merge this alias into your Zed settings:
 
 Search for `zedtex` and press Enter. The result is still named **editor: toggle code actions**; the LaTeX/Notebook menu appears afterward. Zed's extension API does not expose standalone palette commands.
 
-The source is GPL-3.0-or-later; see [LICENSE](LICENSE). Third-party components retain their licenses. Built from the lessons of the [Zed LaTeX fork](https://github.com/maxmalkin/zed), using Tectonic, pypdfium2, Jupyter nbconvert, Mistune, and Playwright.
+The source is MIT licensed; see [LICENSE](LICENSE). Third-party components retain their licenses. Built from the lessons of the [Zed LaTeX fork](https://github.com/maxmalkin/zed), using Tectonic, pypdfium2, Jupyter nbconvert, Mistune, and Playwright.
