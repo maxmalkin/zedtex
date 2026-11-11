@@ -82,7 +82,7 @@ OPEN_TAG_END = re.compile(HTML_ATTRIBUTES + r"[ \t]*>[ \t]*$")
 CLOSE_TAG_END = re.compile(r"[ \t]*>[ \t]*$")
 HTML_END_MARKERS = {"<!--": "-->", "<?": "?>", "<![CDATA[": "]]>"}
 
-SPECIAL = re.compile(r"[\\$`*_\[\]<]|!\[|https?://")
+SPECIAL = re.compile(r"[\\$`*_\[\]<]|!\[|https?://|~~(?=[^\s~])")
 ESCAPE = re.compile(r"(?:\\[!-/:-@\[-`{-~])+")
 BACKTICKS = re.compile(r"`+")
 CLOSING_BRACKETS = re.compile(r"\]+")
@@ -444,6 +444,30 @@ def delimiter_roles(char, before, after):
     return left and (not right or before_punct), right and (not left or after_punct)
 
 
+def closes_formatting(text, start):
+    end = start + 2
+    if end < len(text) and text[end] == "~" and not text.startswith("~~", end):
+        return False
+    if not start:
+        return False
+    if text[start - 1] != "~":
+        return not text[start - 1].isspace()
+    position = start - 2
+    while position >= 0 and text[position] == "\\":
+        position -= 1
+    return start >= 2 and text[start - 2] == "\\" and (start - 2 - position) % 2 == 1
+
+
+def formatting_closers(text):
+    positions = []
+    start = text.find("~~")
+    while start >= 0:
+        if closes_formatting(text, start):
+            positions.append(start)
+        start = text.find("~~", start + 1)
+    return positions
+
+
 def opener_matches(opener, closer):
     if opener[2] != closer[2]:
         return False
@@ -453,10 +477,12 @@ def opener_matches(opener, closer):
 
 
 class Inline:
-    def __init__(self, text, emit, math):
+    def __init__(self, text, emit, math, depth=0):
         self.text = text
         self.emit = emit
         self.math = math
+        self.depth = depth
+        self.closers = None
         self.brackets = []
         self.last_link = None
         self.delimiters = []
@@ -584,6 +610,19 @@ class Inline:
         self.budget = max(0, self.budget - ((found[2] if found else limit) - open_paren))
         return found
 
+    def strikethrough(self, match):
+        start = match.end()
+        if self.closers is None:
+            self.closers = formatting_closers(self.text)
+        index = bisect_right(self.closers, start)
+        if index == len(self.closers) or self.depth >= MAX_DEPTH:
+            return match.start() + 1
+        close = self.closers[index]
+        inner = Inline(self.text[start:close], lambda first, last, key: self.emit(first + start, last + start, key),
+                       self.math, self.depth + 1)
+        inner.run()
+        return close + 2
+
     def angle(self, match):
         text, start = self.text, match.start()
         auto = AUTO_LINK.match(text, start)
@@ -661,7 +700,7 @@ class Inline:
 INLINE_HANDLERS = {
     "\\": Inline.escape, "$": Inline.dollar, "`": Inline.backtick, "*": Inline.delimiter,
     "_": Inline.delimiter, "[": Inline.open_bracket, "!": Inline.open_bracket,
-    "]": Inline.close_bracket, "<": Inline.angle, "h": Inline.bare_url,
+    "]": Inline.close_bracket, "<": Inline.angle, "h": Inline.bare_url, "~": Inline.strikethrough,
 }
 
 
