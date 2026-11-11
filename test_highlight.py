@@ -498,7 +498,7 @@ class SpeedTests(unittest.TestCase):
         return "\n".join(lines) + "\n"
 
     def assert_fast_and_valid(self, text):
-        highlight.cached_cell.cache_clear()
+        highlight.CELL_CACHE.clear()
         started = time.perf_counter()
         highlight.semantic_tokens(text)
         self.assertLess(time.perf_counter() - started, 0.5)
@@ -510,37 +510,41 @@ class SpeedTests(unittest.TestCase):
         self.assertEqual(highlight.semantic_tokens(text), [])
         self.assertLess(time.perf_counter() - started, 0.05)
 
-    def test_cache_is_bounded_and_keyed_on_cell_text(self):
-        info = highlight.cached_cell.cache_info()
-        self.assertIsNotNone(info.maxsize)
-        highlight.cached_cell.cache_clear()
-        text = self.big_file(cells=50, total=1000)
-        highlight.semantic_tokens(text)
-        self.assertEqual(highlight.cached_cell.cache_info().misses, 50)
+    def test_cache_is_keyed_on_cell_text(self):
+        highlight.CELL_CACHE.clear()
+        highlight.semantic_tokens(self.big_file(cells=50, total=1000))
+        self.assertEqual(highlight.CELL_CACHE.misses, 50)
+        self.assertEqual(len(highlight.CELL_CACHE.entries), 50)
 
     def test_one_cell_edit_reparses_only_that_cell(self):
-        highlight.cached_cell.cache_clear()
+        highlight.CELL_CACHE.clear()
         text = self.big_file(cells=100, total=2000)
         first = highlight.semantic_tokens(text)
-        before = highlight.cached_cell.cache_info()
-        edited = text.replace("## Step 50\n", "## Step 50 edited\n")
-        second = highlight.semantic_tokens(edited)
-        after = highlight.cached_cell.cache_info()
-        self.assertEqual(after.misses - before.misses, 1)
-        self.assertEqual(after.hits - before.hits, 99)
+        hits, misses = highlight.CELL_CACHE.hits, highlight.CELL_CACHE.misses
+        second = highlight.semantic_tokens(text.replace("## Step 50\n", "## Step 50 edited\n"))
+        self.assertEqual(highlight.CELL_CACHE.misses - misses, 1)
+        self.assertEqual(highlight.CELL_CACHE.hits - hits, 99)
         self.assertNotEqual(first, second)
 
     def test_cached_cells_survive_line_shifts(self):
-        highlight.cached_cell.cache_clear()
-        text = self.big_file(cells=20, total=400)
+        highlight.CELL_CACHE.clear()
+        highlight.semantic_tokens(self.big_file(cells=20, total=400))
+        misses = highlight.CELL_CACHE.misses
+        highlight.semantic_tokens("import os\n" * 5 + self.big_file(cells=20, total=400))
+        self.assertEqual(highlight.CELL_CACHE.misses, misses)
+
+    def test_a_large_file_stays_fully_warm(self):
+        highlight.CELL_CACHE.clear()
+        text = self.big_file()
         highlight.semantic_tokens(text)
-        before = highlight.cached_cell.cache_info().misses
-        highlight.semantic_tokens("import os\n" * 5 + text)
-        self.assertEqual(highlight.cached_cell.cache_info().misses, before)
+        misses = highlight.CELL_CACHE.misses
+        highlight.semantic_tokens(text)
+        self.assertEqual(highlight.CELL_CACHE.misses, misses)
+        self.assertEqual(highlight.CELL_CACHE.hits, 2500)
 
     def test_large_file_stays_fast(self):
         text = self.big_file()
-        highlight.cached_cell.cache_clear()
+        highlight.CELL_CACHE.clear()
         started = time.perf_counter()
         highlight.semantic_tokens(text)
         cold = time.perf_counter() - started
@@ -605,6 +609,49 @@ class SpeedTests(unittest.TestCase):
         for name, text in cases.items():
             with self.subTest(name=name):
                 self.assert_fast_and_valid(text)
+
+
+class CacheTests(unittest.TestCase):
+    def test_many_distinct_cells_cannot_grow_the_cache_past_its_budget(self):
+        cache = highlight.CellCache(200000)
+        for number in range(500):
+            cache.fetch(f"# Heading {number}\n" + "word *em* $x$ " * 100 + f"{number}")
+            self.assertLessEqual(cache.size, cache.budget)
+        self.assertGreater(cache.size, cache.budget // 2)
+        self.assertLess(len(cache.entries), 500)
+
+    def test_a_cell_larger_than_an_eighth_of_the_budget_is_not_stored(self):
+        cache = highlight.CellCache(200000)
+        cache.fetch("word " * 10000)
+        self.assertEqual(len(cache.entries), 0)
+        self.assertEqual(cache.size, 0)
+
+    def test_least_recently_used_cells_are_evicted_first(self):
+        cache = highlight.CellCache(18000)
+        bodies = [f"*a* {number}\n" + "x" * 1000 for number in range(20)]
+        for body in bodies[:10]:
+            cache.fetch(body)
+        cache.fetch(bodies[0])
+        for body in bodies[10:]:
+            cache.fetch(body)
+        self.assertEqual((cache.hits, cache.misses), (1, 20))
+        self.assertIn(bodies[0], cache.entries)
+        self.assertNotIn(bodies[1], cache.entries)
+        self.assertIn(bodies[-1], cache.entries)
+
+    def test_global_cache_stays_within_budget_for_edits_of_one_large_cell(self):
+        highlight.CELL_CACHE.clear()
+        for number in range(40):
+            highlight.semantic_tokens("# %% [markdown]\n" + "".join(f"# line {number} *em* `c` $x$\n" for _ in range(60)))
+            highlight.semantic_tokens("# %% [markdown]\n# " + "$a$ " * 3000 + f"{number}\n")
+        self.assertLessEqual(highlight.CELL_CACHE.size, highlight.CELL_CACHE.budget)
+
+    def test_cached_results_do_not_depend_on_cache_state(self):
+        text = "# %% [markdown]\n# # H *a*\n# $x$\n# %%\n# %% [md]\n# `c`\n"
+        highlight.CELL_CACHE.clear()
+        cold = highlight.semantic_tokens(text)
+        self.assertEqual(highlight.semantic_tokens(text), cold)
+        self.assertEqual(highlight.semantic_tokens("\n\n" + text)[0:2], [cold[0] + 2, cold[1]])
 
 
 class RobustnessTests(unittest.TestCase):
