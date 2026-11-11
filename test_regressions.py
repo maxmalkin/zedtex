@@ -1,4 +1,4 @@
-"""Fast regressions: python -m unittest -v test_regressions.
+"""Fast regressions: python -m unittest -v test_regressions test_highlight.
 
 Image transport and LSP behavior use a tiny PNG; check.py and check_bundle.py
 exercise the real compiler, rasterizer, kernels, and frozen release binaries.
@@ -19,8 +19,11 @@ from unittest.mock import AsyncMock, Mock, patch
 from urllib.parse import quote
 
 from lsprotocol import types as lsp
+from pygls.capabilities import ServerCapabilitiesBuilder
+from pygls.workspace import Workspace
 from PIL import Image
 
+import highlight
 import server
 import zed_latex as renderer
 
@@ -506,6 +509,117 @@ class SaveAndOpenRegressions(unittest.IsolatedAsyncioTestCase):
             show.assert_not_awaited()
             self.assertEqual(message.call_args.args[0].type, lsp.MessageType.Error)
             self.assertIn("kernel failed", message.call_args.args[0].message)
+
+
+class SemanticTokenRegressions(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="zedtex-tokens-")
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name).resolve()
+        self.workspace = Workspace(self.root.as_uri())
+        self.addCleanup(patch.stopall)
+        patch.object(renderer, "cache_directory", return_value=self.root / "cache").start()
+        patch.object(server.server.protocol, "_workspace", self.workspace).start()
+        patch.object(server, "render_lock", asyncio.Lock()).start()
+        patch.object(server, "export_lock", asyncio.Lock()).start()
+
+    def open(self, name, text="x = 1\n"):
+        uri = (self.root / name).as_uri()
+        self.workspace.put_text_document(lsp.TextDocumentItem(uri=uri, language_id="python", version=1, text=text))
+        return uri
+
+    def tokens(self, uri):
+        return server.semantic_tokens(lsp.SemanticTokensParams(text_document=lsp.TextDocumentIdentifier(uri=uri)))
+
+    def test_full_requests_are_advertised_with_the_tokenizer_legend(self):
+        features = server.server.protocol.fm
+        capabilities = ServerCapabilitiesBuilder(
+            lsp.ClientCapabilities(), {*features.features, *features.builtin_features}, features.feature_options,
+            [], lsp.TextDocumentSyncKind.Incremental).build()
+        provider = capabilities.semantic_tokens_provider
+        self.assertEqual(provider.legend.token_types, highlight.TOKEN_TYPES)
+        self.assertEqual(provider.legend.token_modifiers, [])
+        self.assertIs(provider.full, True)
+        self.assertFalse(provider.range)
+
+    async def test_python_files_are_tokenized_from_the_open_buffer(self):
+        (self.root / "script.py").write_text("on disk\n")
+        for name in ("script.py", "SCRIPT.PY", "Script.Py"):
+            with self.subTest(name=name):
+                buffer = f"# %% [markdown]\n# live {name}\n"
+                uri = self.open(name, buffer)
+                with patch.object(highlight, "semantic_tokens", return_value=[0, 2, 4, 1, 0]) as tokenize:
+                    result = await self.tokens(uri)
+                tokenize.assert_called_once_with(buffer)
+                self.assertEqual(result.data, [0, 2, 4, 1, 0])
+
+    async def test_other_documents_get_an_empty_result(self):
+        uris = [self.open(name) for name in ("notes.md", "paper.tex", "demo.ipynb", "stub.pyi", "script.py.txt", "script")]
+        uris += ["untitled:Untitled-1.py", "https://example.invalid/script.py"]
+        with patch.object(highlight, "semantic_tokens", return_value=[0, 0, 1, 1, 0]) as tokenize:
+            for uri in uris:
+                with self.subTest(uri=uri):
+                    self.assertEqual((await self.tokens(uri)).data, [])
+        tokenize.assert_not_called()
+
+    async def test_python_without_a_markdown_cell_gets_an_empty_result(self):
+        uri = self.open("plain.py", "import os\n\n# %%\nprint(os.name)\n")
+        self.assertEqual((await self.tokens(uri)).data, [])
+
+    async def test_markdown_cell_gets_well_formed_tokens(self):
+        uri = self.open("notebook.py", "# %% [markdown]\n# # Title\n# Math $x^2$ and *emphasis*.\n\n# %%\nprint(1)\n")
+        data = (await self.tokens(uri)).data
+        self.assertTrue(data)
+        self.assertEqual(len(data) % 5, 0)
+        self.assertTrue(all(0 <= kind < len(highlight.TOKEN_TYPES) for kind in data[3::5]))
+        self.assertEqual(set(data[4::5]), {0})
+
+    async def test_tokenizer_error_gives_an_empty_result(self):
+        uri = self.open("broken.py")
+        with patch.object(highlight, "semantic_tokens", side_effect=RuntimeError("tokenizer failed")):
+            self.assertEqual((await self.tokens(uri)).data, [])
+
+    async def test_unreadable_buffer_gives_an_empty_result(self):
+        with patch.object(highlight, "semantic_tokens") as tokenize:
+            self.assertEqual((await self.tokens((self.root / "missing.py").as_uri())).data, [])
+        tokenize.assert_not_called()
+
+    async def test_tokens_do_not_wait_for_preview_or_export_locks(self):
+        uri = self.open("script.py")
+        with patch.object(highlight, "semantic_tokens", return_value=[0, 0, 1, 1, 0]):
+            async with server.render_lock, server.export_lock:
+                result = await asyncio.wait_for(self.tokens(uri), 1)
+        self.assertEqual(result.data, [0, 0, 1, 1, 0])
+
+    async def test_slow_tokenizer_does_not_delay_preview_or_export(self):
+        started = Event()
+        resume = Event()
+        source = self.root / "notes.md"
+        source.write_text("$x$")
+
+        def tokenize(text):
+            started.set()
+            if not resume.wait(5):
+                raise TimeoutError("Preview or export was blocked by tokens")
+            return [0, 0, 1, 1, 0]
+
+        with patch.object(highlight, "semantic_tokens", side_effect=tokenize), \
+                patch.object(renderer, "preview", return_value=self.root / "preview.md") as preview, \
+                patch.object(server, "export_in_process", return_value=self.root / "notes.html") as export, \
+                patch.object(server.server, "window_show_message") as message:
+            task = asyncio.create_task(self.tokens(self.open("script.py")))
+            try:
+                self.assertTrue(await asyncio.to_thread(started.wait, 2))
+                await asyncio.wait_for(server.build(source.as_uri(), show=False), 1)
+                await asyncio.wait_for(server.build(source.as_uri(), "html", show=False), 1)
+                preview.assert_called_once()
+                export.assert_called_once()
+                self.assertFalse(task.done())
+            finally:
+                resume.set()
+                result = await task
+            self.assertEqual(result.data, [0, 0, 1, 1, 0])
+            message.assert_not_called()
 
 
 class PdfRuntimeRegressions(unittest.TestCase):

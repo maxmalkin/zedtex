@@ -9,6 +9,7 @@ from lsprotocol import types as lsp
 from pygls.lsp.server import LanguageServer
 from pygls.uris import to_fs_path
 
+import highlight
 import zed_latex as renderer
 
 
@@ -141,6 +142,19 @@ async def export_html(uri: str):
 @server.command("latex.export.pdf")
 async def export_pdf(uri: str):
     await build(uri, "pdf")
+
+
+@server.feature(lsp.TEXT_DOCUMENT_SEMANTIC_TOKENS_FULL, lsp.SemanticTokensLegend(token_types=highlight.TOKEN_TYPES, token_modifiers=[]))
+async def semantic_tokens(params):
+    try:
+        uri = params.text_document.uri
+        path = to_fs_path(uri)
+        if path and Path(path).suffix.lower() == ".py":
+            text = server.workspace.get_text_document(uri).source
+            return lsp.SemanticTokens(data=await asyncio.to_thread(highlight.semantic_tokens, text))
+    except Exception:
+        pass
+    return lsp.SemanticTokens(data=[])
 
 
 @server.feature(lsp.TEXT_DOCUMENT_DID_SAVE)
