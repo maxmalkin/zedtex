@@ -5,6 +5,7 @@ import shutil
 import sys
 import tarfile
 import tempfile
+import time
 from urllib.request import urlopen
 import zipfile
 
@@ -13,8 +14,15 @@ url = "https://github.com/tectonic-typesetting/tectonic/releases/download/tecton
 destination = Path("dist/latex-rendering")
 with tempfile.TemporaryDirectory() as temporary:
     archive = Path(temporary) / target
-    with urlopen(url, timeout=120) as response, archive.open("wb") as output:
-        shutil.copyfileobj(response, output)
+    for attempt in range(4):
+        try:
+            with urlopen(url, timeout=120) as response, archive.open("wb") as output:
+                shutil.copyfileobj(response, output)
+            break
+        except OSError:
+            if attempt == 3:
+                raise
+            time.sleep(5 * (attempt + 1))
     if target.endswith(".zip"):
         with zipfile.ZipFile(archive) as bundle:
             # Only the known compiler executable is extracted from the upstream archive.
