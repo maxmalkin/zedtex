@@ -1,6 +1,6 @@
 id = "latex-rendering-lsp"
 name = "ZedTeX"
-version = "0.1.5"
+version = "0.2.0"
 schema_version = 1
 authors = ["Max Malkin <max@malkin.io>"]
 description = "Package-aware TeX page previews, Markdown math images, notebook HTML/PDF exports through code actions, and Markdown and math highlighting in notebook scripts."

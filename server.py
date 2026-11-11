@@ -13,7 +13,7 @@ import highlight
 import zed_latex as renderer
 
 
-server = LanguageServer("ZedTeX", "0.1.4")
+server = LanguageServer("ZedTeX", "0.2.0")
 active_previews = set()
 render_lock = asyncio.Lock()
 export_lock = asyncio.Lock()

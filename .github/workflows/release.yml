@@ -77,7 +77,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
-          gh release create backend-v0.1.4 release/*.zip
+          gh release create backend-v0.2.0 release/*.zip
           --target "$GITHUB_SHA"
-          --title "Renderer backend 0.1.4"
-          --notes "Smaller bundles reuse Zed's shared Node runtime and exclude unused Jedi, ipykernel, and Tk components. Browser downloads are shared across renderer updates. Includes 50 regression tests plus real rendering, fresh notebook execution, and frozen LSP preview/export checks on all four targets. Standalone PDF export requires Node.js 20+ on PATH or PLAYWRIGHT_NODEJS_PATH. Registry publication is separate."
+          --title "Renderer backend 0.2.0"
+          --notes "Adds syntax and LaTeX math highlighting for Markdown cells in Jupytext percent-format Python notebook scripts, through LSP semantic tokens. Turn it on by setting semantic_tokens to combined for Python in Zed settings. Includes 141 regression tests plus real rendering, fresh notebook execution, and frozen LSP preview, export and semantic token checks on all four targets. Standalone PDF export requires Node.js 20+ on PATH or PLAYWRIGHT_NODEJS_PATH. Registry publication is separate."
