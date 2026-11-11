@@ -325,16 +325,16 @@ def contiguous(pieces):
     return True
 
 
-def indent_width(text):
-    width = 0
+def indent_width(text, column=0):
+    start = column
     for char in text:
         if char == " ":
-            width += 1
+            column += 1
         elif char == "\t":
-            width += 4 - width % 4
+            column += 4 - column % 4
         else:
             break
-    return width
+    return column - start
 
 
 def columns_to_characters(text, columns):
@@ -977,7 +977,7 @@ def item_first_line(text, base, width):
     rest = text[width:]
     if not rest.strip():
         return [], width + 1
-    gap = indent_width(rest)
+    gap = indent_width(rest, width)
     gap = 1 if gap >= 5 else gap
     strip = min(gap, len(rest) - len(rest.lstrip(" \t")))
     return [(rest[strip:], base + width + strip)], width + gap
