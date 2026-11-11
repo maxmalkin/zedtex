@@ -318,7 +318,7 @@ class MathParityTests(unittest.TestCase):
         "[a $x$](http://u/$y$)", "[a]($z$) $w$", "![i $x$](u) $y$", "[a] ($x$)", "[a](b) $x$", "[a\n$x$](u)",
         "http://x.y/$a$ $b$", "# Head $x$", "Setext $x$\n===", "## $x$ ##",
         "> $x$\n> $$\n> y\n> $$", "> $$x$$", "- $x$\n- $$\n  y\n  $$", "- item\n\n  $$\n  y\n  $$\n",
-        "1. $x$ and $$y$$", "> - $x$", "* $x$\n\n$$\ny\n$$", "[ref]:\n$x$", "[ref]:\n$x$\n\n$y$", "[ref]: <u>\n$x$", "para\n[ref]:\n$x$", "[ref]:\n\n$x$", "[ref]: u/$a$ \"t\"\n$x$", "-\ta\n\n    $x$ b", "-\ta\n\n\t$x$ b", "1.\t$x$\n\t$y$",
+        "1. $x$ and $$y$$", "> - $x$", "* $x$\n\n$$\ny\n$$", ">\t$$ x $$", "> >\t$$ x $$", "> >\t<b>$x$</b>", "> \t$x$", "> >\n\t$$ x $$", "> a\n\t$x$", "> >\n> >\t$$ x $$", "[ref]:\n$x$", "[ref]:\n$x$\n\n$y$", "[ref]: <u>\n$x$", "para\n[ref]:\n$x$", "[ref]:\n\n$x$", "[ref]: u/$a$ \"t\"\n$x$", "-\ta\n\n    $x$ b", "-\ta\n\n\t$x$ b", "1.\t$x$\n\t$y$",
         "*a $x* y$*", "**$x$**", "_ $x$ _", "$a$$b$", "${}$", "~~$x$~~",
         "| a | b |\n|---|---|\n| $x$ | $y$ |",
         "$x$\n\n$$y$$\n\n$$\nz\n$$", "$$a\\$$b$$", "$$\\\nx$$",
