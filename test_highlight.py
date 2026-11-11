@@ -135,11 +135,11 @@ class CellTests(unittest.TestCase):
 
     def test_marker_inside_closed_fence_is_not_a_marker(self):
         text = markdown_cell("```", "# %% x", "# %% [raw]", "```", "# After")
-        self.assertEqual([kind for _, kind in pairs(text)], ["string"] * 4 + ["keyword"])
+        self.assertEqual([kind for _, kind in pairs(text)], ["property"] * 4 + ["keyword"])
 
     def test_marker_inside_unclosed_fence_still_ends_the_cell(self):
         text = markdown_cell("```", "text") + "# %% [raw]\n# # Skipped\n"
-        self.assertEqual([(line, kind) for line, _, _, kind in tokens_of(text)], [(1, "string"), (2, "string")])
+        self.assertEqual([(line, kind) for line, _, _, kind in tokens_of(text)], [(1, "property"), (2, "property")])
 
     def test_marker_inside_closed_fence_in_raw_cell_is_not_a_marker(self):
         text = "# %% [raw]\n# ```\n# %% [markdown]\n# ```\n# %% [markdown]\n# # Real\n"
@@ -215,7 +215,7 @@ class MarkdownTokenTests(unittest.TestCase):
         self.check("#hashtag", [])
 
     def test_heading_with_closing_hashes_and_inner_tokens(self):
-        self.check("## A `b` $c$ ##", [("## A ", "keyword"), ("`b`", "string"), (" ", "keyword"),
+        self.check("## A `b` $c$ ##", [("## A ", "keyword"), ("`b`", "property"), (" ", "keyword"),
                                        ("$", "operator"), ("c", "variable"), ("$", "operator"),
                                        (" ##", "keyword")])
 
@@ -233,30 +233,30 @@ class MarkdownTokenTests(unittest.TestCase):
         self.check("snake_case_name and 2*3*4", [("*3*", "parameter")])
 
     def test_inline_code_spans(self):
-        self.check("`a` ``b`c`` ` d `", [("`a`", "string"), ("``b`c``", "string"), ("` d `", "string")])
+        self.check("`a` ``b`c`` ` d `", [("`a`", "property"), ("``b`c``", "property"), ("` d `", "property")])
 
     def test_emphasis_markers_inside_code_are_literal(self):
-        self.check("`*a*` *b*", [("`*a*`", "string"), ("*b*", "parameter")])
+        self.check("`*a*` *b*", [("`*a*`", "property"), ("*b*", "parameter")])
 
     def test_fenced_code_blocks(self):
-        self.check("```python\nx = *1*\n```\nafter *a*", [("```python", "string"), ("x = *1*", "string"),
-                                                         ("```", "string"), ("*a*", "parameter")])
-        self.check("~~~\n$x$\n~~~", [("~~~", "string"), ("$x$", "string"), ("~~~", "string")])
+        self.check("```python\nx = *1*\n```\nafter *a*", [("```python", "property"), ("x = *1*", "property"),
+                                                         ("```", "property"), ("*a*", "parameter")])
+        self.check("~~~\n$x$\n~~~", [("~~~", "property"), ("$x$", "property"), ("~~~", "property")])
 
     def test_unclosed_fence_runs_to_the_end_of_the_cell(self):
-        self.check("```\nx\n*a*", [("```", "string"), ("x", "string"), ("*a*", "string")])
+        self.check("```\nx\n*a*", [("```", "property"), ("x", "property"), ("*a*", "property")])
 
     def test_indented_code_has_no_tokens(self):
         self.check("para\n\n    *code* $x$\n\nafter", [])
 
     def test_links_text_and_url(self):
-        self.check("[text](http://x.y/a_b \"Title\")", [("text", "function"), ("http://x.y/a_b \"Title\"", "string")])
-        self.check("[a *b*](<u v>) ![alt](p.png)", [("a ", "function"), ("*b*", "parameter"), ("<u v>", "string"),
-                                                    ("alt", "function"), ("p.png", "string")])
+        self.check("[text](http://x.y/a_b \"Title\")", [("text", "function"), ("http://x.y/a_b \"Title\"", "type")])
+        self.check("[a *b*](<u v>) ![alt](p.png)", [("a ", "function"), ("*b*", "parameter"), ("<u v>", "type"),
+                                                    ("alt", "function"), ("p.png", "type")])
 
     def test_autolinks_bare_urls_and_references(self):
-        self.check("<https://a.b/c_d> https://e.f/g_h", [("https://a.b/c_d", "string"), ("https://e.f/g_h", "string")])
-        self.check("[ref]: http://example.com \"t\"", [("ref", "function"), ("http://example.com", "string")])
+        self.check("<https://a.b/c_d> https://e.f/g_h", [("https://a.b/c_d", "type"), ("https://e.f/g_h", "type")])
+        self.check("[ref]: http://example.com \"t\"", [("ref", "function"), ("http://example.com", "type")])
 
     def test_unmatched_brackets_are_plain_text(self):
         self.check("[not a link] and [a](", [])
@@ -267,7 +267,7 @@ class MarkdownTokenTests(unittest.TestCase):
 
     def test_list_item_content_is_tokenized(self):
         self.check("- item *a*\n  more `b`\n  - nested **c**",
-                   [("-", "operator"), ("*a*", "parameter"), ("`b`", "string"), ("-", "operator"),
+                   [("-", "operator"), ("*a*", "parameter"), ("`b`", "property"), ("-", "operator"),
                     ("**c**", "enumMember")])
 
     def test_block_quote_markers(self):
@@ -285,7 +285,7 @@ class MarkdownTokenTests(unittest.TestCase):
 
     def test_multi_line_span_is_split_per_line(self):
         text = markdown_cell("a `code", "more` b")
-        self.assertEqual(tokens_of(text), [(1, 4, 5, "string"), (2, 2, 5, "string")])
+        self.assertEqual(tokens_of(text), [(1, 4, 5, "property"), (2, 2, 5, "property")])
 
 
 class MathParityTests(unittest.TestCase):
@@ -410,7 +410,7 @@ class MathTokenTests(unittest.TestCase):
     def test_math_inside_emphasis_and_link_text(self):
         self.check("*a $x$ b*", [("*a ", "parameter"), ("$", "operator"), ("x", "variable"), ("$", "operator"),
                                  (" b*", "parameter")])
-        self.check("[$x$](u)", [("$", "operator"), ("x", "variable"), ("$", "operator"), ("u", "string")])
+        self.check("[$x$](u)", [("$", "operator"), ("x", "variable"), ("$", "operator"), ("u", "type")])
 
 
 class TypeTests(unittest.TestCase):
@@ -418,11 +418,12 @@ class TypeTests(unittest.TestCase):
         self.assertTrue(set(highlight.TOKEN_TYPES) <= ALLOWED_TYPES)
         self.assertEqual(len(set(highlight.TOKEN_TYPES)), len(highlight.TOKEN_TYPES))
         self.assertTrue(set(highlight.STYLE.values()) <= ALLOWED_TYPES)
+        self.assertNotIn("string", highlight.TOKEN_TYPES)
 
-    def test_default_mapping_is_the_brief_mapping(self):
+    def test_default_mapping_avoids_string_because_triple_quoted_cells_are_already_strings(self):
         self.assertEqual(highlight.STYLE, {
-            "heading": "keyword", "emphasis": "parameter", "strong": "enumMember", "code_span": "string",
-            "code_block": "string", "link_text": "function", "link_url": "string", "list_marker": "operator",
+            "heading": "keyword", "emphasis": "parameter", "strong": "enumMember", "code_span": "property",
+            "code_block": "property", "link_text": "function", "link_url": "type", "list_marker": "operator",
             "quote_marker": "operator", "math_delimiter": "operator", "latex_command": "function",
             "latex_operator": "operator", "latex_number": "number", "latex_environment": "type",
             "latex_comment": "comment", "latex_text": "variable",
@@ -431,7 +432,7 @@ class TypeTests(unittest.TestCase):
     def test_every_token_type_index_points_into_the_legend(self):
         text = markdown_cell("# H", "*a* **b** `c` [d](e)", "- f", "> g", "$$", "\\begin{x} a 1 % c", "\\end{x}", "$$")
         used = {kind for *_, kind in tokens_of(text)}
-        self.assertEqual(used, {"keyword", "parameter", "enumMember", "string", "function", "operator",
+        self.assertEqual(used, {"keyword", "parameter", "enumMember", "property", "function", "operator",
                                 "number", "type", "comment", "variable"})
 
 
@@ -465,11 +466,11 @@ class WireTests(unittest.TestCase):
 
     def test_astral_characters_inside_tokens_count_two_units(self):
         text = "# %% [markdown]\n# `\U0001F600\U0001F600` *é*\n"
-        self.assertEqual(tokens_of(text), [(1, 2, 6, "string"), (1, 9, 3, "parameter")])
+        self.assertEqual(tokens_of(text), [(1, 2, 6, "property"), (1, 9, 3, "parameter")])
 
     def test_multi_line_tokens_are_split_and_lines_are_counted_after_crlf(self):
         text = "x\r\n# %% [markdown]\r\n# a `b\r\n# c` d\r\n"
-        self.assertEqual(tokens_of(text), [(2, 4, 2, "string"), (3, 2, 2, "string")])
+        self.assertEqual(tokens_of(text), [(2, 4, 2, "property"), (3, 2, 2, "property")])
 
     def test_no_token_covers_comment_prefix_marker_or_quotes(self):
         text = ("# %% [markdown] **x**\n# # H\n#\n#**a**\n# %% [md]\n\"\"\"\n# H2 $x$\n\"\"\"\n"
