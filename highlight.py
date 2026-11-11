@@ -66,7 +66,8 @@ INDENT = re.compile(r" {4}.| *\t.")
 FENCE = re.compile(r"( {0,3})(`{3,}|~{3,})[ \t]*(.*?)$")
 RULE = re.compile(r" {0,3}(?:(?:-[ \t]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})$")
 ITEM = re.compile(r"( {0,3})([*+-]|\d{1,9}[.)])(?=[ \t]|$)")
-QUOTE = re.compile(r"( {0,3})>( ?)")
+QUOTE = re.compile(r"( {0,3})>")
+LEADING_TAB = re.compile(r"( {0,3})\t")
 QUOTE_NEEDS_MARKER = re.compile(r"[ \t\v\f]*$|(?: {4}| *\t).|(?: {0,3})(?:`{3,}|~{3,})")
 BLOCK_MATH = re.compile(BLOCK_MATH_PATTERN, re.M)
 MATH_OPENER = re.compile(r" {0,3}\$\$[ \t]*")
@@ -312,6 +313,18 @@ def close_spans(stack, limit, flat, cursor):
             flat.append((cursor, end, kind))
             cursor = end
     return cursor
+
+
+def expand_leading_tab(text, base):
+    match = LEADING_TAB.match(text)
+    if match is None:
+        return text, base
+    return "   " + text[match.end():], base + match.end() - 3
+
+
+def quote_content(text, base):
+    text, base = expand_leading_tab(text, base)
+    return (text[1:], base + 1) if text.startswith(" ") else (text, base)
 
 
 def contiguous(pieces):
@@ -872,14 +885,14 @@ class Scanner:
             match = QUOTE.match(text)
             if match:
                 self.add(base + match.end(1), base + match.end(1) + 1, "quote_marker")
-                content = text[match.end():]
-                body.append((content, base + match.end()))
+                content, content_base = quote_content(text[match.end():], base + match.end())
+                body.append((content, content_base))
                 needs_marker = needs_marker if end > index else bool(QUOTE_NEEDS_MARKER.match(content))
                 previous_blank = not content.strip()
             elif needs_marker or previous_blank or interrupts_quote(text):
                 break
             else:
-                body.append((text, base))
+                body.append(expand_leading_tab(text, base))
             end += 1
         return body, end
 
