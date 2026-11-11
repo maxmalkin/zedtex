@@ -68,7 +68,7 @@ PDF export reuses Zed's shared Node runtime rather than downloading another copy
 
 ## Resource use
 
-Renderer 0.1.4 downloads were approximately 57 MiB on Windows x64, 69 MiB on Linux x64, 63 MiB on Apple Silicon, and 65 MiB on Intel macOS. The bundles exclude the duplicate Node executable and unused Jedi completion, ipykernel, and Tk components. Release ZIPs use maximum standard DEFLATE compression. Renderer 0.2.0 adds one small Python module; its download sizes have not been measured separately.
+Renderer 0.2.0 downloads are approximately 57 MiB on Windows x64, 69 MiB on Linux x64, 63 MiB on Apple Silicon, and 65 MiB on Intel macOS. The bundles exclude the duplicate Node executable and unused Jedi completion, ipykernel, and Tk components. Release ZIPs use maximum standard DEFLATE compression.
 
 These sizes exclude Zed's shared Node runtime, TeX package caches, and any fallback browser download. Zed can download Node if it is not already available. Notebook code still runs in the user's registered kernel; removing ipykernel from the renderer does not remove notebook execution support.
 
