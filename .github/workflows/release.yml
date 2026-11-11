@@ -32,7 +32,7 @@ jobs:
           node-version: '22'
       - run: python -m pip install --no-cache-dir . pyinstaller
       - name: Check image transport and language-server regressions
-        run: python -m unittest -v test_regressions
+        run: python -m unittest -v test_regressions test_highlight
       - name: Package native server
         run: >-
           python -m PyInstaller --noconfirm --clean --onedir --name latex-rendering
