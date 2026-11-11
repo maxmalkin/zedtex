@@ -31,7 +31,9 @@ Markdown math appears in the generated preview. Zed’s original Markdown previe
 
 ## Notebook script highlighting
 
-ZedTeX colours Markdown cells, and the math inside them, in Python notebook scripts. These are `.py` files with `# %%` cells, as Jupytext writes them. Both `# %% [markdown]` forms work: lines that start with `#`, and a triple-quoted block. Use `r"""` for the block when your math has backslashes. Only this percent format is supported.
+ZedTeX colours Markdown cells, and the math inside them, in Python notebook scripts. These are `.py` files with `# %%` cells, as Jupytext writes them. Only this percent format is supported.
+
+Both tags work: `# %% [markdown]` and `# %% [md]`. The cell text can be lines that start with `#`, or a triple-quoted block. Use `r"""` for the block when your math has backslashes.
 
 Zed turns this feature off. Merge this into your Zed settings to turn it on:
 
@@ -40,6 +42,8 @@ Zed turns this feature off. Merge this into your Zed settings to turn it on:
 ```
 
 This also turns on semantic tokens from other Python servers, such as pyright. That can change some Python colours.
+
+With `combined`, Zed keeps its normal Python colours for text that ZedTeX does not mark. In a `#` cell, that text keeps the comment colour. In a triple-quoted cell, it keeps the string colour.
 
 The file stays plain Python, so ruff and pyright keep working. Try it with [examples/notebook_script.py](examples/notebook_script.py). Math in `.md` files is coloured by Zed itself when the LaTeX extension is installed.
 
