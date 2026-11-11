@@ -18,4 +18,4 @@ dependencies = [
 zed-latex = "zed_latex:main"
 
 [tool.setuptools]
-py-modules = ["zed_latex", "server"]
+py-modules = ["zed_latex", "server", "highlight"]
