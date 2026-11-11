@@ -68,10 +68,19 @@ def read():
         headers[key.lower()] = value.strip()
     assert b"content-length" in headers, "LSP server exited or wrote non-protocol output"
     return json.loads(process.stdout.read(int(headers[b"content-length"])))
+def semantic_data(request_id, name, text):
+    uri = (examples / name).as_uri()
+    send({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {"uri": uri, "languageId": "python", "version": 1, "text": text}}})
+    send({"jsonrpc": "2.0", "id": request_id, "method": "textDocument/semanticTokens/full", "params": {"textDocument": {"uri": uri}}})
+    response = read()
+    assert response.get("id") == request_id and "error" not in response, response
+    return response["result"]["data"]
 try:
     send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"processId": None, "rootUri": examples.as_uri(), "capabilities": {}}})
     response = read()
     assert response["result"]["capabilities"]["codeActionProvider"]
+    provider = response["result"]["capabilities"]["semanticTokensProvider"]
+    assert provider["full"] and provider["legend"]["tokenTypes"] and not provider["legend"]["tokenModifiers"], provider
     commands = response["result"]["capabilities"]["executeCommandProvider"]["commands"]
     send({"jsonrpc": "2.0", "method": "initialized", "params": {}})
     for request_id, (name, expected) in enumerate([
@@ -83,6 +92,10 @@ try:
         response = read()
         assert [action["command"]["command"] for action in response["result"]] == expected
         assert all(command in commands for command in expected), "Zed filters out unadvertised commands"
+    data = semantic_data(40, "notebook_script.py", (examples / "notebook_script.py").read_text(encoding="utf-8"))
+    assert data and len(data) % 5 == 0, data
+    assert all(0 <= kind < len(provider["legend"]["tokenTypes"]) for kind in data[3::5]) and set(data[4::5]) == {0}, data
+    assert semantic_data(41, "no_markdown_cell.py", "# %%\nprint('no Markdown here')\n") == []
     notebook_source = (examples / "notebook.ipynb").read_bytes()
     for request_id, (name, command, opened_name) in enumerate([
         ("paper.tex", "latex.preview", "page-001.png"), ("notes.md", "latex.preview", "preview.md"),
@@ -119,4 +132,4 @@ finally:
     if process.poll() is None:
         process.kill()
         process.wait()
-print("PASS: frozen renderer, PNG, executed notebook HTML/PDF, LSP preview command and image opening")
+print("PASS: frozen renderer, PNG, executed notebook HTML/PDF, LSP preview command, image opening and semantic tokens")
