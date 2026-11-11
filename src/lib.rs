@@ -2,6 +2,14 @@ use zed_extension_api::{self as zed, Architecture, Os, Result};
 
 struct LatexRendering;
 
+fn node_environment() -> Vec<(String, String)> {
+    // Share Zed's Node runtime instead of shipping another copy for PDF export.
+    // A failed Node setup must not prevent TeX/Markdown previews or HTML export.
+    zed::node_binary_path()
+        .map(|node| vec![("PLAYWRIGHT_NODEJS_PATH".into(), node)])
+        .unwrap_or_default()
+}
+
 impl zed::Extension for LatexRendering {
     fn new() -> Self {
         Self
@@ -10,8 +18,21 @@ impl zed::Extension for LatexRendering {
     fn language_server_command(
         &mut self,
         server: &zed::LanguageServerId,
-        _worktree: &zed::Worktree,
+        worktree: &zed::Worktree,
     ) -> Result<zed::Command> {
+        let user_binary = zed::settings::LspSettings::for_worktree("latex-rendering", worktree)
+            .ok()
+            .and_then(|settings| settings.binary);
+        if let Some(zed::settings::CommandSettings {
+            path: Some(command),
+            arguments,
+            ..
+        }) = user_binary
+        {
+            let args = arguments.unwrap_or_else(|| vec!["serve".into()]);
+            let env = node_environment();
+            return Ok(zed::Command { command, args, env });
+        }
         let (os, architecture) = zed::current_platform();
         let os_name = match os {
             Os::Windows => "windows",
@@ -55,11 +76,7 @@ impl zed::Extension for LatexRendering {
         Ok(zed::Command {
             command: path.to_string_lossy().into_owned(),
             args: vec!["serve".into()],
-            // Share Zed's Node runtime instead of shipping another copy for PDF export.
-            // A failed Node setup must not prevent TeX/Markdown previews or HTML export.
-            env: zed::node_binary_path()
-                .map(|node| vec![("PLAYWRIGHT_NODEJS_PATH".into(), node)])
-                .unwrap_or_default(),
+            env: node_environment(),
         })
     }
 }
