@@ -13,7 +13,7 @@
 # $$
 
 # %% [markdown]
-"""
+r"""
 ## Triple-quoted body
 
 The same Markdown works in a quoted block: **bold**, *italic*, `code` and
@@ -23,7 +23,7 @@ a [link](https://example.com).
 2. Second step with $x^2 + y^2 = z^2$
 
 $$
-\frac{a + b}{2}
+x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}
 $$
 """
 
