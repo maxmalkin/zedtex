@@ -36,13 +36,11 @@ MAX_DEPTH = 8
 EMPHASIS_LOOKBACK = 50
 CACHE_BUDGET = 16 * 1024 * 1024
 CACHE_ENTRY_OVERHEAD = 256
-WHITESPACE = " \r\n\t\f"
-ASCII_WHITESPACE = " \t\n\r\x0b\x0c"
+WHITESPACE = " \t\n\r\x0b\x0c"
 
 MARKER = re.compile(
     r"^[^\S\n]*#[^\S\n]*(?:%%(%*)[^\S\n](.*)|(?:%%|<codecell>|In\[[0-9 ]*\]:?)[^\S\n]*$)", re.M)
-FENCE_CLOSER = re.compile(r"^(?:# ?)? {0,3}(`{3,}|~{3,})[^\S\n]*$", re.M)
-CODE_FENCE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)$")
+FENCE_CLOSER = re.compile(r"^(?:# ?)? {0,3}(`{3,}|~{3,})[ \t]*$", re.M)
 CODE_DANGER = re.compile(r"\"\"\"|'''")
 TEXT_DANGER = re.compile(r"\"\"\"|'''|```|~~~")
 QUOTE_OR_HASH = re.compile(r"[\"'#]")
@@ -50,29 +48,26 @@ CODE_LINES = re.compile(r"^[^\n\"']*[\"'][^\n]*", re.M)
 TEXT_LINES = re.compile(r"^[^\n\"'`~]*[\"'`~][^\n]*", re.M)
 ASTRAL = re.compile("[\U00010000-\U0010ffff]")
 
-START = re.compile(
-    r"(?P<indent> {4}.| *\t.)"
-    r"|(?P<fence> {0,3}(?:`{3,}|~{3,}))"
-    r"|(?P<heading> {0,3}\#{1,6}(?!\#)(?=[ \t]|$))"
-    r"|(?P<setext> {0,3}[=-]+[ \t]*$)"
-    r"|(?P<rule> {0,3}(?:(?:-[ \t]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})$)"
-    r"|(?P<quote> {0,3}>)"
-    r"|(?P<math> {0,3}\$\$)"
-    r"|(?P<item> {0,3}(?:[*+-]|\d{1,9}[.)])(?=[ \t]|$))"
-    r"|(?P<reference> {0,3}\[)"
-    r"|(?P<html> {0,3}<)"
-    r"|(?P<blank>[ \t\v\f]*$)"
-)
-BLANK = re.compile(r"[ \t\v\f]*$")
-LINE_STARTERS = frozenset(" \t\v\f`~#=-_*>$+[<0123456789")
-LINE_STARTERS |= {""}
-INDENT = re.compile(r" {4}.| *\t.")
+BLOCK_PATTERNS = {
+    "indent": r" {4}.| *\t.",
+    "fence": r" {0,3}(?:`{3,}|~{3,})",
+    "heading": r" {0,3}\#{1,6}(?!\#)(?=[ \t]|$)",
+    "setext": r" {0,3}[=-]+[ \t]*$",
+    "rule": r" {0,3}(?:(?:-[ \t]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})$",
+    "quote": r" {0,3}>",
+    "math": r" {0,3}\$\$",
+    "item": r"( {0,3})([*+-]|\d{1,9}[.)])(?=[ \t]|$)",
+    "reference": r" {0,3}\[",
+    "html": r" {0,3}<",
+    "blank": r"[ \t\v\f]*$",
+}
+START = re.compile("|".join(f"(?P<{name}>{pattern})" for name, pattern in BLOCK_PATTERNS.items()))
+INDENT, BLANK, RULE, ITEM = (re.compile(BLOCK_PATTERNS[name]) for name in ("indent", "blank", "rule", "item"))
+LINE_STARTERS = frozenset(" \t\v\f`~#=-_*>$+[<0123456789") | {""}
 FENCE = re.compile(r"( {0,3})(`{3,}|~{3,})[ \t]*(.*?)$")
-RULE = re.compile(r" {0,3}(?:(?:-[ \t]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})$")
-ITEM = re.compile(r"( {0,3})([*+-]|\d{1,9}[.)])(?=[ \t]|$)")
 QUOTE = re.compile(r"( {0,3})>")
 LEADING_TAB = re.compile(r"( {0,3})\t")
-QUOTE_NEEDS_MARKER = re.compile(r"[ \t\v\f]*$|(?: {4}| *\t).|(?: {0,3})(?:`{3,}|~{3,})")
+QUOTE_NEEDS_MARKER = re.compile("|".join(BLOCK_PATTERNS[name] for name in ("blank", "indent", "fence")))
 BLOCK_MATH = re.compile(BLOCK_MATH_PATTERN, re.M)
 MATH_OPENER = re.compile(r" {0,3}\$\$[ \t]*")
 MATH_CLOSER = re.compile(r"\$\$[ \t]*")
@@ -94,7 +89,6 @@ EMPHASIS_RUN = re.compile(r"\*+|_+")
 AUTO_LINK = re.compile(r"<[A-Za-z][A-Za-z0-9.+-]{1,31}:[^<>\x00-\x20]*>")
 BARE_URL = re.compile(r"""https?://[^\s<]+[^<.,:;"')\]\s]""")
 INLINE_TAG = re.compile(r"<" + HTML_TAGNAME + HTML_ATTRIBUTES + r"\s*/?>|</" + HTML_TAGNAME + r"\s*>")
-DECLARATION = re.compile(r"<![A-Z]+[ \t\n\r\f]")
 SIMPLE_DESTINATION = re.compile(r"[^\s()\\<\x00-\x1f\x7f]*")
 LINK_TITLE_OPENERS = {'"': '"', "'": "'", "(": ")"}
 ASCII_PUNCTUATION = frozenset("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~")
@@ -105,20 +99,13 @@ INLINE_MATH_WITHOUT_CODE = (
     re.compile(_ALTERNATIVES[0] + "|" + _ALTERNATIVES[2]) if len(_ALTERNATIVES) == 3 else INLINE_MATH)
 
 LATEX = re.compile(
-    r"(?P<comment>%[^\n]*)"
+    r"(?P<latex_comment>%[^\n]*)"
     r"|(?P<environment>(?P<keyword>\\(?:begin|end))(?P<gap>\s*)\{(?P<name>[^{}\n]*)\})"
-    r"|(?P<command>\\(?:[A-Za-z]+\*?|[^\sA-Za-z]))"
-    r"|(?P<number>\d+(?:\.\d+)?)"
-    r"|(?P<word>[^\W\d_]+)"
-    r"|(?P<operator>(?:[^\s\w\\%]|_)+|\\)"
+    r"|(?P<latex_command>\\(?:[A-Za-z]+\*?|[^\sA-Za-z]))"
+    r"|(?P<latex_number>\d+(?:\.\d+)?)"
+    r"|(?P<latex_text>[^\W\d_]+)"
+    r"|(?P<latex_operator>(?:[^\s\w\\%]|_)+|\\)"
 )
-LATEX_STYLES = {
-    "comment": "latex_comment",
-    "command": "latex_command",
-    "number": "latex_number",
-    "word": "latex_text",
-    "operator": "latex_operator",
-}
 
 
 def cell_kind(title):
@@ -163,8 +150,8 @@ def quote_step(line, index, single, triple, triple_start):
 
 def uncomment(line):
     if line.startswith("# "):
-        return line[2:]
-    return line[1:] if line.startswith("#") else line
+        return line[2:], 2
+    return (line[1:], 1) if line.startswith("#") else (line, 0)
 
 
 class Fences:
@@ -183,16 +170,11 @@ class Fences:
 
 
 def fence_after(line, fence, closed_later):
-    match = CODE_FENCE.match(uncomment(line))
+    text = uncomment(line)[0]
     if fence:
-        closes = (match and match.group(1)[0] == fence[0] and len(match.group(1)) >= fence[1]
-                  and not match.group(2).strip())
-        return None if closes else fence
-    if match and not (match.group(1)[0] == "`" and "`" in match.group(2)):
-        opening = (match.group(1)[0], len(match.group(1)))
-        if closed_later(*opening):
-            return opening
-    return None
+        return None if closes_fence(text, *fence) else fence
+    opening = fence_opening(text)
+    return opening if opening and closed_later(*opening) else None
 
 
 def advance(text, begin, end, is_text, state, fences):
@@ -280,9 +262,7 @@ def body_entries(lines, quotable):
     quoted = triple_quoted_entries(lines) if quotable else None
     if quoted is not None:
         return quoted
-    return [(index, line[2:], 2) if line.startswith("# ")
-            else (index, line[1:], 1) if line.startswith("#")
-            else (index, line, 0) for index, line in enumerate(lines)]
+    return [(index, *uncomment(line)) for index, line in enumerate(lines)]
 
 
 def flatten(spans):
@@ -370,9 +350,11 @@ def closes_fence(text, char, size):
     return len(run) >= size and not run.strip(char)
 
 
-def valid_fence(text):
+def fence_opening(text):
     match = FENCE.match(text)
-    return bool(match) and not (match.group(2)[0] == "`" and "`" in match.group(3))
+    if match and not (match.group(2)[0] == "`" and "`" in match.group(3)):
+        return match.group(2)[0], len(match.group(2))
+    return None
 
 
 def interrupts_container(text):
@@ -381,7 +363,7 @@ def interrupts_container(text):
     if kind in ("heading", "quote"):
         return True
     if kind == "fence":
-        return valid_fence(text)
+        return fence_opening(text) is not None
     return kind == "html" and BLOCK_HTML.match(text) is not None
 
 
@@ -397,7 +379,7 @@ def list_break(text, bound, bullet):
 
 
 def interrupts_quote(text):
-    if BLANK.match(text) or RULE.match(text) or ITEM.match(text) or valid_fence(text):
+    if BLANK.match(text) or RULE.match(text) or ITEM.match(text) or fence_opening(text):
         return True
     return BLOCK_HTML.match(text) is not None
 
@@ -425,7 +407,7 @@ def tokenize_latex(text, start, end, emit):
     for match in LATEX.finditer(text, start, end):
         kind = match.lastgroup
         if kind != "environment":
-            emit(match.start(), match.end(), LATEX_STYLES[kind])
+            emit(match.start(), match.end(), kind)
             continue
         emit(match.start("keyword"), match.end("keyword"), "latex_command")
         emit(match.end("gap"), match.end("gap") + 1, "latex_operator")
@@ -480,8 +462,8 @@ def opener_matches(opener, closer):
 
 
 class Inline:
-    closers = code_runs = last_link = last_code_closer = budget = None
-    missing = frozenset()
+    closers = code_runs = last_code_closer = budget = None
+    comments_unclosed = False
 
     def __init__(self, text, emit, math, depth=0):
         self.text = text
@@ -556,24 +538,8 @@ class Inline:
         return end
 
     def open_bracket(self, match):
-        image = match.group() == "!["
-        self.brackets.append([match.end(), image, True, self.last_link, len(self.delimiters)])
-        if not image:
-            self.last_link = self.brackets[-1]
+        self.brackets.append((match.end(), match.group() == "![", len(self.delimiters)))
         return match.end()
-
-    def discard_brackets(self, count):
-        stack = self.brackets
-        if count >= len(stack):
-            stack.clear()
-            self.last_link = None
-            return
-        removed = stack[-count:]
-        del stack[-count:]
-        for bracket in removed:
-            if not bracket[1]:
-                self.last_link = bracket[3]
-                break
 
     def close_bracket(self, match):
         start = match.start()
@@ -581,28 +547,18 @@ class Inline:
         followed = self.text.startswith("(", run_end)
         literal = run_end - start - (1 if followed else 0)
         if literal:
-            self.discard_brackets(literal)
+            del self.brackets[-literal:]
         if not followed or not self.brackets:
             return run_end
         opener = self.brackets.pop()
-        if not opener[1]:
-            self.last_link = opener[3]
-        target = self.link_target(run_end) if opener[2] else None
+        target = self.link_target(run_end)
         if target is None:
             return run_end
-        self.finish_link(opener, run_end - 1, target)
-        return target[2]
-
-    def finish_link(self, opener, close, target):
-        self.emit(opener[0], close, "link_text")
+        self.emit(opener[0], run_end - 1, "link_text")
         self.emit(target[0], target[1], "link_url")
-        self.resolve_emphasis(self.delimiters[opener[4]:])
-        del self.delimiters[opener[4]:]
-        if not opener[1]:
-            bracket = self.last_link
-            while bracket is not None and bracket[2]:
-                bracket[2] = False
-                bracket = bracket[3]
+        self.resolve_emphasis(self.delimiters[opener[2]:])
+        del self.delimiters[opener[2]:]
+        return target[2]
 
     def link_target(self, open_paren):
         if self.budget is None:
@@ -635,28 +591,15 @@ class Inline:
         return start + 1 if end is None else end
 
     def html_end(self, start):
-        text = self.text
-        if text.startswith("<!-->", start):
-            return start + 5
-        if text.startswith("<!--->", start):
-            return start + 6
-        for opener, closer in (("<!--", "-->"), ("<?", "?>"), ("<![CDATA[", "]]>")):
-            if text.startswith(opener, start):
-                return self.after_closer(closer, start + len(opener))
-        if text.startswith("<!", start):
-            declaration = DECLARATION.match(text, start)
-            return self.after_closer(">", declaration.end()) if declaration else None
-        tag = INLINE_TAG.match(text, start)
+        if self.text.startswith("<!--", start):
+            return self.comment_end(start + 4)
+        tag = INLINE_TAG.match(self.text, start)
         return tag.end() if tag else None
 
-    def after_closer(self, closer, position):
-        if closer in self.missing:
-            return None
-        found = self.text.find(closer, position)
-        if found < 0:
-            self.missing = self.missing | {closer}
-            return None
-        return found + len(closer)
+    def comment_end(self, position):
+        found = -1 if self.comments_unclosed else self.text.find("-->", position)
+        self.comments_unclosed = found < 0
+        return None if found < 0 else found + 3
 
     def bare_url(self, match):
         text, start = self.text, match.start()
@@ -876,12 +819,12 @@ class Scanner:
             self.add(start, start + len(stripped), "code_block")
 
     def fenced(self, lines, index, paragraph, depth):
-        if not valid_fence(lines[index][0]):
+        opening = fence_opening(lines[index][0])
+        if opening is None:
             return None
         self.flush(paragraph)
-        marker = FENCE.match(lines[index][0]).group(2)
         end = index + 1
-        while end < len(lines) and not closes_fence(lines[end][0], marker[0], len(marker)):
+        while end < len(lines) and not closes_fence(lines[end][0], *opening):
             end += 1
         for text, base in lines[index:end + 1]:
             self.code_line(text, base)
@@ -892,10 +835,10 @@ class Scanner:
         self.flush(paragraph)
         hashes = START.match(text).end()
         body = text[hashes:]
-        content = trim_closing_hashes(body.strip(ASCII_WHITESPACE))
-        lead = len(body) - len(body.lstrip(ASCII_WHITESPACE))
+        content = trim_closing_hashes(body.strip(WHITESPACE))
+        lead = len(body) - len(body.lstrip(WHITESPACE))
         indent = len(text) - len(text.lstrip(" "))
-        self.add(base + indent, base + len(text.rstrip(ASCII_WHITESPACE)), "heading")
+        self.add(base + indent, base + len(text.rstrip(WHITESPACE)), "heading")
         self.inline_text([(content, base + hashes + lead)])
         return index + 1
 
@@ -1126,8 +1069,7 @@ def line_starts(texts):
     return starts
 
 
-def convert_spans(flat, entries, starts):
-    texts = [text for _, text, _ in entries]
+def convert_spans(flat, entries, texts, starts):
     astral = {} if ASTRAL.search("".join(texts)) else None
     body_lines = [body_line for body_line, _, _ in entries]
     shifts = [offset - start for (_, _, offset), start in zip(entries, starts)]
@@ -1174,8 +1116,7 @@ def line_token(entry, line_start, start, stop, kind, astral, row):
     return (body_line, offset + first + before, last - first + inside, kind)
 
 
-def scan_entries(entries):
-    texts = [text for _, text, _ in entries]
+def scan_lines(texts):
     starts = line_starts(texts)
     scanner = Scanner()
     scanner.blocks(list(zip(texts, starts)))
@@ -1191,8 +1132,9 @@ def compute_cell(body):
         entries = body_entries(body.split("\n"), quotable)
         if not entries:
             return EMPTY_CELL
-        scanner, starts = scan_entries(entries)
-        return convert_spans(flatten(scanner.spans), entries, starts)
+        texts = [text for _, text, _ in entries]
+        scanner, starts = scan_lines(texts)
+        return convert_spans(flatten(scanner.spans), entries, texts, starts)
     except Exception:
         return EMPTY_CELL
 
@@ -1236,10 +1178,7 @@ CELL_CACHE = CellCache(CACHE_BUDGET)
 
 
 def markdown_math(markdown):
-    texts = markdown.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    scanner = Scanner()
-    scanner.blocks(list(zip(texts, line_starts(texts))))
-    return scanner.math
+    return scan_lines(markdown.replace("\r\n", "\n").replace("\r", "\n").split("\n"))[0].math
 
 
 def semantic_tokens(text):
