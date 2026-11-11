@@ -46,6 +46,8 @@ CODE_FENCE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)$")
 CODE_DANGER = re.compile(r"\"\"\"|'''")
 TEXT_DANGER = re.compile(r"\"\"\"|'''|```|~~~")
 QUOTE_OR_HASH = re.compile(r"[\"'#]")
+CODE_LINES = re.compile(r"^[^\n\"']*[\"'][^\n]*", re.M)
+TEXT_LINES = re.compile(r"^[^\n\"'`~]*[\"'`~][^\n]*", re.M)
 ASTRAL = re.compile("[\U00010000-\U0010ffff]")
 
 START = re.compile(
@@ -62,6 +64,8 @@ START = re.compile(
     r"|(?P<blank>[ \t\v\f]*$)"
 )
 BLANK = re.compile(r"[ \t\v\f]*$")
+LINE_STARTERS = frozenset(" \t\v\f`~#=-_*>$+[<0123456789")
+LINE_STARTERS |= {""}
 INDENT = re.compile(r" {4}.| *\t.")
 FENCE = re.compile(r"( {0,3})(`{3,}|~{3,})[ \t]*(.*?)$")
 RULE = re.compile(r" {0,3}(?:(?:-[ \t]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})$")
@@ -196,14 +200,13 @@ def advance(text, begin, end, is_text, state, fences):
     danger = TEXT_DANGER if is_text else CODE_DANGER
     if triple is None and fence is None and not danger.search(text, begin, end):
         return state
-    offset = begin
-    for line in text[begin:end].split("\n")[:-1]:
-        offset += len(line) + 1
+    for match in (TEXT_LINES if is_text else CODE_LINES).finditer(text, begin, end):
+        line = match.group()
         was_quoted = triple is not None
         if '"' in line or "'" in line:
             triple = read_quotes(line, triple)
         if is_text and not was_quoted and ("`" in line or "~" in line):
-            fence = fence_after(line, fence, lambda char, size: fences.closed_after(offset, char, size))
+            fence = fence_after(line, fence, lambda char, size: fences.closed_after(match.end() + 1, char, size))
     return triple, fence
 
 
@@ -477,19 +480,16 @@ def opener_matches(opener, closer):
 
 
 class Inline:
+    closers = code_runs = last_link = last_code_closer = budget = None
+    missing = frozenset()
+
     def __init__(self, text, emit, math, depth=0):
         self.text = text
         self.emit = emit
         self.math = math
         self.depth = depth
-        self.closers = None
         self.brackets = []
-        self.last_link = None
         self.delimiters = []
-        self.code_runs = None
-        self.missing = set()
-        self.budget = 8 * len(text) + 4096
-        self.last_code_closer = None
 
     def run(self):
         text = self.text
@@ -605,6 +605,8 @@ class Inline:
                 bracket = bracket[3]
 
     def link_target(self, open_paren):
+        if self.budget is None:
+            self.budget = 8 * len(self.text) + 4096
         limit = min(len(self.text), open_paren + self.budget)
         found = parse_link_target(self.text, open_paren + 1, limit)
         self.budget = max(0, self.budget - ((found[2] if found else limit) - open_paren))
@@ -652,7 +654,7 @@ class Inline:
             return None
         found = self.text.find(closer, position)
         if found < 0:
-            self.missing.add(closer)
+            self.missing = self.missing | {closer}
             return None
         return found + len(closer)
 
@@ -826,7 +828,7 @@ class Scanner:
         return emit
 
     def inline_text(self, pieces, style=None):
-        joined = "\n".join([text for text, _ in pieces])
+        joined = pieces[0][0] if len(pieces) == 1 else "\n".join([text for text, _ in pieces])
         text = joined.strip(WHITESPACE)
         if not text:
             return
@@ -846,7 +848,7 @@ class Scanner:
         index = 0
         while index < len(lines):
             text, _ = lines[index]
-            match = START.match(text)
+            match = START.match(text) if text[:1] in LINE_STARTERS else None
             handler = BLOCK_HANDLERS.get(match.lastgroup) if match else None
             following = handler(self, lines, index, paragraph, depth) if handler else None
             if following is None:
@@ -1028,8 +1030,16 @@ class Scanner:
         following, end = collect_item(lines, index + 1, content, (continue_width, width, bullet))
         while content and not content[-1][0].strip():
             content.pop()
-        self.blocks(content, depth + 1)
+        if not plain_item(content):
+            self.blocks(content, depth + 1)
         return following, end
+
+
+def plain_item(content):
+    if not content:
+        return True
+    text = content[0][0]
+    return len(content) == 1 and text[:1] not in LINE_STARTERS and SPECIAL.search(text) is None
 
 
 def item_first_line(text, base, width):
@@ -1119,19 +1129,25 @@ def line_starts(texts):
 def convert_spans(flat, entries, starts):
     texts = [text for _, text, _ in entries]
     astral = {} if ASTRAL.search("".join(texts)) else None
-    tokens = []
+    body_lines = [body_line for body_line, _, _ in entries]
+    shifts = [offset - start for (_, _, offset), start in zip(entries, starts)]
+    wire = []
     line = 0
     line_end = starts[0] + len(texts[0])
+    previous_line = previous_start = 0
     for start, end, kind in flat:
         while line + 1 < len(starts) and starts[line + 1] <= start:
             line += 1
             line_end = starts[line] + len(texts[line])
         if end <= line_end and astral is None:
-            body_line, _, offset = entries[line]
-            tokens.append((body_line, offset + start - starts[line], end - start, kind))
+            tokens = ((body_lines[line], start + shifts[line], end - start, kind),)
         else:
-            tokens.extend(split_span(start, end, kind, line, entries, starts, astral))
-    return tokens
+            tokens = split_span(start, end, kind, line, entries, starts, astral)
+        for token_line, token_start, length, token_kind in tokens:
+            delta = token_line - previous_line
+            wire += (delta, token_start if delta else token_start - previous_start, length, token_kind, 0)
+            previous_line, previous_start = token_line, token_start
+    return array("i", wire), previous_line, previous_start
 
 
 def split_span(start, end, kind, row, entries, starts, astral):
@@ -1166,16 +1182,6 @@ def scan_entries(entries):
     return scanner, starts
 
 
-def encode_wire(tokens):
-    wire = array("i")
-    line = start = 0
-    for token_line, token_start, length, kind in tokens:
-        delta = token_line - line
-        wire.extend((delta, token_start if delta else token_start - start, length, kind, 0))
-        line, start = token_line, token_start
-    return wire, line, start
-
-
 EMPTY_CELL = (array("i"), 0, 0)
 
 
@@ -1186,7 +1192,7 @@ def compute_cell(body):
         if not entries:
             return EMPTY_CELL
         scanner, starts = scan_entries(entries)
-        return encode_wire(convert_spans(flatten(scanner.spans), entries, starts))
+        return convert_spans(flatten(scanner.spans), entries, starts)
     except Exception:
         return EMPTY_CELL
 
