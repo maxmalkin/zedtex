@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use zed_extension_api::{self as zed, Architecture, Os, Result};
 
 struct LatexRendering;
@@ -26,11 +27,13 @@ impl zed::Extension for LatexRendering {
         if let Some(zed::settings::CommandSettings {
             path: Some(command),
             arguments,
-            ..
+            env,
         }) = user_binary
         {
             let args = arguments.unwrap_or_else(|| vec!["serve".into()]);
-            let env = node_environment();
+            let mut merged: HashMap<_, _> = node_environment().into_iter().collect();
+            merged.extend(env.unwrap_or_default());
+            let env = merged.into_iter().collect();
             return Ok(zed::Command { command, args, env });
         }
         let (os, architecture) = zed::current_platform();
