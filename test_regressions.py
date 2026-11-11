@@ -5,7 +5,9 @@ exercise the real compiler, rasterizer, kernels, and frozen release binaries.
 """
 import base64
 import asyncio
+import builtins
 from concurrent.futures import ThreadPoolExecutor
+import importlib.util
 import io
 import json
 import os
@@ -531,16 +533,46 @@ class SemanticTokenRegressions(unittest.IsolatedAsyncioTestCase):
     def tokens(self, uri):
         return server.semantic_tokens(lsp.SemanticTokensParams(text_document=lsp.TextDocumentIdentifier(uri=uri)))
 
-    def test_full_requests_are_advertised_with_the_tokenizer_legend(self):
-        features = server.server.protocol.fm
-        capabilities = ServerCapabilitiesBuilder(
+    def capabilities_of(self, module):
+        features = module.server.protocol.fm
+        return ServerCapabilitiesBuilder(
             lsp.ClientCapabilities(), {*features.features, *features.builtin_features}, features.feature_options,
             [], lsp.TextDocumentSyncKind.Incremental).build()
-        provider = capabilities.semantic_tokens_provider
+
+    def load_server_without_highlight(self, error):
+        real_import = builtins.__import__
+
+        def import_module(name, *args, **kwargs):
+            if name == "highlight":
+                raise error
+            return real_import(name, *args, **kwargs)
+
+        spec = importlib.util.spec_from_file_location("server_without_highlight", server.__file__)
+        module = importlib.util.module_from_spec(spec)
+        with patch("builtins.__import__", import_module), self.assertLogs("server_without_highlight", "ERROR"):
+            spec.loader.exec_module(module)
+        return module
+
+    def test_full_requests_are_advertised_with_the_tokenizer_legend(self):
+        provider = self.capabilities_of(server).semantic_tokens_provider
         self.assertEqual(provider.legend.token_types, highlight.TOKEN_TYPES)
         self.assertEqual(provider.legend.token_modifiers, [])
         self.assertIs(provider.full, True)
         self.assertFalse(provider.range)
+
+    def test_server_without_highlight_still_serves_code_actions(self):
+        point = lsp.Position(line=0, character=0)
+        params = lsp.CodeActionParams(
+            text_document=lsp.TextDocumentIdentifier(uri=(self.root / "demo.py").as_uri()), range=lsp.Range(point, point),
+            context=lsp.CodeActionContext(diagnostics=[]))
+        for error in (ImportError("cannot import name BLOCK_TAGS"), AttributeError("math pattern moved")):
+            with self.subTest(error=error):
+                module = self.load_server_without_highlight(error)
+                self.assertIsNone(module.highlight)
+                self.assertIsNone(self.capabilities_of(module).semantic_tokens_provider)
+                self.assertIn("latex.preview", module.server.protocol.fm.commands)
+                self.assertEqual([action.command.command for action in module.code_actions(params)[:2]],
+                                 ["latex.export.html", "latex.export.pdf"])
 
     async def test_python_files_are_tokenized_from_the_open_buffer(self):
         (self.root / "script.py").write_text("on disk\n")
