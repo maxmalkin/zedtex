@@ -14,13 +14,7 @@ The extension adds a supplementary language server for LaTeX, Markdown, Python a
 
 Zed cannot extend its built-in Python highlighting from an extension. So the server sends LSP semantic tokens for the Markdown cells of Python notebook scripts, and for the math inside them. The file stays plain Python, so ruff and pyright keep working. For the same reason the extension does not change `languages`, `language_ids` or the `languages/` folder.
 
-The user must turn on one Zed setting, because Zed ships it off and an extension cannot change it:
-
-```json
-"languages": { "Python": { "semantic_tokens": "combined" } }
-```
-
-This also turns on semantic tokens from other Python servers, such as pyright, which can change some Python colours. Math in `.md` files is coloured by Zed itself when the LaTeX extension is installed.
+The user must turn on one Zed setting, because Zed ships it off and an extension cannot change it. The [README](README.md#notebook-script-highlighting) has the setting and what it also changes.
 
 How it works:
 
@@ -32,7 +26,7 @@ How it works:
 
 Limits:
 
-- Percent format only: `# %% [markdown]` and `# %% [md]` cells, with a `#` comment body or a triple-quoted body (`"""` or `'''`, with an optional `r` prefix).
+- Percent format only: `# %% [markdown]` and `# %% [md]` cells, with a `#` comment body or a triple-quoted body (`"""` or `'''`, with an optional `r` or `R` prefix).
 - Not the light or sphinx Jupytext formats. Not `.ipynb`, which stays JSON.
 - Colours come from the theme's standard token styles. There are no custom colours.
 
@@ -123,7 +117,7 @@ To run a local or unreleased server instead of the download, set the `binary` pa
 }
 ```
 
-On Windows, write paths with forward slashes, like `C:/path/to/zedtex/.venv/Scripts/python.exe`. A frozen bundle works too: set only `path` to `dist/latex-rendering/latex-rendering`. When `arguments` is missing, the extension passes `serve`. The extension still sets `PLAYWRIGHT_NODEJS_PATH` to Zed's Node runtime. Restart the language server after each change to the Python files. Remove the setting to go back to the downloaded renderer.
+On Windows, write paths with forward slashes, like `C:/path/to/zedtex/.venv/Scripts/python.exe`. A frozen bundle works too: set only `path` to `dist/latex-rendering/latex-rendering`. When `arguments` is missing, the extension passes `serve`. The extension sets `PLAYWRIGHT_NODEJS_PATH` to Zed's Node runtime. Any `env` values you add are passed on too, and they win. Restart the language server after each change to the Python files. Remove the setting to go back to the downloaded renderer.
 
 Release order: first run the **Renderer bundles** workflow, which publishes the `backend-vX.Y.Z` release. Only then publish an extension version whose `src/lib.rs` points at that tag, or the extension cannot download its renderer. Keep these in step: the backend version in `src/lib.rs`, `server.py`, `pyproject.toml` and `release.yml`, and the extension version in `extension.toml`.
 
@@ -133,7 +127,13 @@ The Python renderer, regression checks, and `package_bundle.py` are maintained h
 
 ## Troubleshooting
 
-No colours in the Markdown cells of a notebook script: check that `"semantic_tokens": "combined"` is set for Python (see above), that the file ends in `.py`, and that the cell starts with `# %% [markdown]` or `# %% [md]`. Then run **editor: restart language server**. Other cell formats are not coloured.
+No colours in the Markdown cells of a notebook script: check that `"semantic_tokens": "combined"` is set for Python (see the [README](README.md#notebook-script-highlighting)), that the file ends in `.py`, and that the cell starts with `# %% [markdown]` or `# %% [md]`. Then run **editor: restart language server**. Other cell formats are not coloured.
+
+No colours and no notebook code actions in Python files: your Zed settings may list `language_servers` for Python. If that list has no `"..."`, Zed starts only the servers it names, so ZedTeX does not start. Add `"..."` to the list, as below. Or add `"latex-rendering"`, which is the name of ZedTeX in that list.
+
+```json
+"languages": { "Python": { "language_servers": ["pyright", "ruff", "..."] } }
+```
 
 If the action menu does not appear after installing or reloading, click another line in the original source file. If needed, run **editor: restart language server**, wait for startup, then move the cursor again. `.ipynb` files should show **Jupyter Notebook** or **JSON** in the status bar; reload the extension if they show **Unknown**.
 
