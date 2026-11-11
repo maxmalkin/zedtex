@@ -7,6 +7,7 @@ ZedTeX adds LaTeX previews and notebook exports to Zed, with support for real Te
 | `.tex` | PDF and page previews inside Zed |
 | `.md` | A Markdown preview with rendered equations |
 | `.ipynb` / Python notebook | HTML or PDF with freshly executed outputs |
+| `.py` notebook script | Coloured Markdown cells and math inside them ([one setting needed](#notebook-script-highlighting)) |
 
 ## Install
 
@@ -27,6 +28,20 @@ Keep editing the original file; saving updates an activated preview. Unchanged e
 Markdown math appears in the generated preview. Zed’s original Markdown preview is unchanged. For live Jupyter equations, see the [rendering helper](DEVELOPMENT.md#jupyter-and-exports).
 
 ![Markdown source beside its generated preview — illustration using actual ZedTeX output](assets/markdown-preview.png)
+
+## Notebook script highlighting
+
+ZedTeX colours Markdown cells, and the math inside them, in Python notebook scripts. These are `.py` files with `# %%` cells, as Jupytext writes them. Both `# %% [markdown]` forms work: lines that start with `#`, and a triple-quoted block. Use `r"""` for the block when your math has backslashes. Only this percent format is supported.
+
+Zed turns this feature off. Merge this into your Zed settings to turn it on:
+
+```json
+"languages": { "Python": { "semantic_tokens": "combined" } }
+```
+
+This also turns on semantic tokens from other Python servers, such as pyright. That can change some Python colours.
+
+The file stays plain Python, so ruff and pyright keep working. Try it with [examples/notebook_script.py](examples/notebook_script.py). Math in `.md` files is coloured by Zed itself when the LaTeX extension is installed.
 
 ## LaTeX packages
 
