@@ -132,30 +132,25 @@ def read_quotes(line, triple):
     triple_start = -1
     for match in QUOTE_OR_HASH.finditer(line):
         index = match.start()
-        char = line[index]
-        if char == "#":
+        if line[index] == "#":
             if single is None and triple is None:
                 break
             continue
-        if line[index - 1:index] == "\\":
-            continue
-        if single == char:
-            single = None
-            continue
-        if single is not None:
-            continue
-        if line[index - 2:index + 1] == char * 3 and index >= triple_start + 3:
-            if triple == char:
-                triple = None
-                triple_start = index
-            elif triple is None:
-                triple = char
-                triple_start = index
-            continue
-        if triple is not None:
-            continue
-        single = char
+        single, triple, triple_start = quote_step(line, index, single, triple, triple_start)
     return triple
+
+
+def quote_step(line, index, single, triple, triple_start):
+    char = line[index]
+    if line[index - 1:index] == "\\" or (single is not None and single != char):
+        return single, triple, triple_start
+    if single == char:
+        return None, triple, triple_start
+    if line[index - 2:index + 1] == char * 3 and index >= triple_start + 3:
+        if triple == char:
+            return single, None, index
+        return (single, char, index) if triple is None else (single, triple, triple_start)
+    return (single, triple, triple_start) if triple is not None else (char, triple, triple_start)
 
 
 def uncomment(line):
@@ -292,27 +287,28 @@ def flatten(spans):
         previous_end = end
     else:
         return spans
-    spans = [span for span in spans if span[1] > span[0]]
     flat = []
     stack = []
     cursor = 0
-
-    def close_through(limit):
-        nonlocal cursor
-        while stack and stack[-1][0] <= limit:
-            end, kind = stack.pop()
-            if end > cursor:
-                flat.append((cursor, end, kind))
-                cursor = end
-
     for start, end, kind in spans:
-        close_through(start)
+        if end <= start:
+            continue
+        cursor = close_spans(stack, start, flat, cursor)
         if stack and start > cursor:
             flat.append((cursor, start, stack[-1][1]))
         cursor = max(cursor, start)
         stack.append((min(end, stack[-1][0]) if stack else end, kind))
-    close_through(float("inf"))
+    close_spans(stack, float("inf"), flat, cursor)
     return flat
+
+
+def close_spans(stack, limit, flat, cursor):
+    while stack and stack[-1][0] <= limit:
+        end, kind = stack.pop()
+        if end > cursor:
+            flat.append((cursor, end, kind))
+            cursor = end
+    return cursor
 
 
 def contiguous(pieces):
@@ -653,66 +649,61 @@ INLINE_HANDLERS = {
 }
 
 
+def skip_characters(text, position, limit, characters):
+    while position < limit and text[position] in characters:
+        position += 1
+    return position
+
+
 def parse_link_target(text, start, limit):
-    position = start
-    while position < limit and text[position] in " \t":
-        position += 1
+    position = skip_characters(text, start, limit, " \t")
     if position < limit and text[position] == "\n":
-        position += 1
-        while position < limit and text[position] in " \t":
-            position += 1
+        position = skip_characters(text, position + 1, limit, " \t")
     first = position
     position = destination_end(text, position, limit)
     if position is None:
         return None
     last = position
     title_end = title_end_after(text, position, limit)
-    position = title_end if title_end else position
-    while position < limit and text[position] in " \t\n\r\f":
-        position += 1
+    position = skip_characters(text, title_end or position, limit, " \t\n\r\f")
     if position >= limit or text[position] != ")":
         return None
     return first, title_end or last, position + 1
+
+
+def escaped_pair(text, position, limit):
+    return text[position] == "\\" and position + 1 < limit and text[position + 1] in ASCII_PUNCTUATION
+
+
+def angle_destination_end(text, position, limit):
+    position += 1
+    while position < limit:
+        char = text[position]
+        if char == ">":
+            return position + 1
+        if char in "<\n\r\x00":
+            return None
+        position += 2 if escaped_pair(text, position, limit) else 1
+    return None
 
 
 def destination_end(text, position, limit):
     if position >= limit:
         return None
     if text[position] == "<":
-        position += 1
-        while position < limit:
-            char = text[position]
-            if char == ">":
-                return position + 1
-            if char == "\\" and position + 1 < limit and text[position + 1] in ASCII_PUNCTUATION:
-                position += 2
-                continue
-            if char in "<\n\r\x00":
-                return None
-            position += 1
-        return None
+        return angle_destination_end(text, position, limit)
     simple = SIMPLE_DESTINATION.match(text, position, limit)
     if simple.end() < limit and text[simple.end()] in ") \t\n\r\f":
         return simple.end()
     depth = 0
     while position < limit:
         char = text[position]
-        if char in " \t\n\r\f":
+        if char in " \t\n\r\f" or (char == ")" and depth == 0):
             break
-        if ord(char) < 32 or char == "\x7f":
+        if ord(char) < 32 or char == "\x7f" or (char == "(" and depth == 20):
             return None
-        if char == "\\" and position + 1 < limit and text[position + 1] in ASCII_PUNCTUATION:
-            position += 2
-            continue
-        if char == "(":
-            depth += 1
-            if depth > 20:
-                return None
-        elif char == ")":
-            if depth == 0:
-                break
-            depth -= 1
-        position += 1
+        depth += (char == "(") - (char == ")")
+        position += 2 if escaped_pair(text, position, limit) else 1
     return position if depth == 0 and position < limit else None
 
 
@@ -725,25 +716,18 @@ def blank_line_follows(text, position, limit):
 def title_end_after(text, position, limit):
     if position >= limit or text[position] not in " \t\n\r\f":
         return None
-    while position < limit and text[position] in " \t\n\r\f":
-        position += 1
-    closer = LINK_TITLE_OPENERS.get(text[position]) if position < limit else None
-    if closer is None:
+    position = skip_characters(text, position, limit, " \t\n\r\f")
+    if position >= limit or text[position] not in LINK_TITLE_OPENERS:
         return None
     opener = text[position]
     position += 1
     while position < limit:
         char = text[position]
-        if char == "\x00" or (opener == "(" and char == "("):
+        if char == "\x00" or (opener == "(" and char == "(") or (char == "\n" and blank_line_follows(text, position + 1, limit)):
             return None
-        if char == "\n" and blank_line_follows(text, position + 1, limit):
-            return None
-        if char == "\\" and position + 1 < limit and text[position + 1] in ASCII_PUNCTUATION:
-            position += 2
-            continue
-        if char == closer:
+        if char == LINK_TITLE_OPENERS[opener]:
             return position + 1
-        position += 1
+        position += 2 if escaped_pair(text, position, limit) else 1
     return None
 
 
@@ -872,6 +856,11 @@ class Scanner:
         if depth >= MAX_DEPTH:
             return None
         self.flush(paragraph)
+        body, end = self.quote_body(lines, index)
+        self.blocks(body, depth + 1)
+        return end
+
+    def quote_body(self, lines, index):
         body = []
         end = index
         needs_marker = previous_blank = False
@@ -889,8 +878,7 @@ class Scanner:
             else:
                 body.append((text, base))
             end += 1
-        self.blocks(body, depth + 1)
-        return end
+        return body, end
 
     def display_math(self, lines, index, paragraph, depth):
         if depth:
@@ -901,14 +889,19 @@ class Scanner:
             return self.single_line_math(single, base, paragraph, index)
         if MATH_OPENER.fullmatch(text) is None:
             return None
+        end = self.math_closer(lines, index)
+        return None if end is None else self.multi_line_math(lines, index, end, paragraph)
+
+    def math_closer(self, lines, index):
         if self.closer_lines is None:
             self.closer_lines = [position for position, (line, _) in enumerate(lines)
                                  if MATH_CLOSER.fullmatch(line)]
         found = bisect_left(self.closer_lines, index + 2)
-        if found == len(self.closer_lines):
-            return None
+        return self.closer_lines[found] if found < len(self.closer_lines) else None
+
+    def multi_line_math(self, lines, index, end, paragraph):
         self.flush(paragraph)
-        end = self.closer_lines[found]
+        text, base = lines[index]
         body = lines[index + 1:end]
         raw = "\n".join([line for line, _ in body])
         opener = len(text) - len(text.lstrip(" "))
@@ -921,11 +914,10 @@ class Scanner:
     def single_line_math(self, found, base, paragraph, index):
         self.flush(paragraph)
         start, end = found.start("math_text_single"), found.end("math_text_single")
-        text = found.string
         self.math.append((found.group("math_text_single"), True))
         self.add(base + start - 2, base + start, "math_delimiter")
         self.add(base + end, base + end + 2, "math_delimiter")
-        tokenize_latex(text, start, end, self.line_emitter(base))
+        tokenize_latex(found.string, start, end, self.line_emitter(base))
         return index + 1
 
     def reference(self, lines, index, paragraph, depth):
@@ -940,40 +932,12 @@ class Scanner:
         return index + 1
 
     def html(self, lines, index, paragraph, depth):
-        text, _ = lines[index]
-        found = HTML_START.match(text)
+        found = HTML_START.match(lines[index][0])
         if found is None:
             return None
-        marker = found.group(1)
-        end_marker = HTML_END_MARKERS.get(marker) or (">" if marker.startswith("<!") else None)
-        if end_marker:
+        end = html_block_end(lines, index, found, bool(paragraph))
+        if end is not None:
             self.flush(paragraph)
-            return self.after_marker(lines, index, end_marker, found.end())
-        closing = marker.startswith("</")
-        name = marker[2 if closing else 1:].lower()
-        if not closing and name in PRE_TAGS:
-            self.flush(paragraph)
-            return self.after_marker(lines, index, "</" + name + ">", found.end())
-        if name in BLOCK_TAGS:
-            self.flush(paragraph)
-            return self.until_blank(lines, index)
-        tail = CLOSE_TAG_END if closing else OPEN_TAG_END
-        if paragraph or tail.match(text, found.end()) is None:
-            return None
-        return self.until_blank(lines, index)
-
-    def after_marker(self, lines, index, marker, column):
-        end = index
-        position = lines[index][0].find(marker, column)
-        while position < 0 and end + 1 < len(lines):
-            end += 1
-            position = lines[end][0].find(marker)
-        return end + 1
-
-    def until_blank(self, lines, index):
-        end = index + 1
-        while end < len(lines) and BLANK.match(lines[end][0]) is None:
-            end += 1
         return end
 
     def items(self, lines, index, paragraph, depth):
@@ -996,43 +960,81 @@ class Scanner:
     def item(self, lines, index, bullet, depth):
         text, base = lines[index]
         match = ITEM.match(text)
-        indent, width = len(match.group(1)), match.end()
-        self.add(base + indent, base + width, "list_marker")
-        rest = text[width:]
-        content = []
-        if rest.strip():
-            gap = indent_width(rest)
-            gap = 1 if gap >= 5 else gap
-            strip = min(gap, len(rest) - len(rest.lstrip(" \t")))
-            content.append((rest[strip:], base + width + strip))
-            continue_width = width + gap
-        else:
-            continue_width = width + 1
-        started_blank = not content
-        position, previous_blank, following = index + 1, False, None
-        while position < len(lines):
-            line, line_base = lines[position]
-            if BLANK.match(line):
-                content.append(("", line_base))
-                previous_blank = True
-            elif indent_width(line) >= continue_width:
-                if previous_blank and started_blank and not any(part.strip() for part, _ in content):
-                    break
-                strip = columns_to_characters(line, continue_width)
-                content.append((line[strip:], line_base + strip))
-                previous_blank = False
-            else:
-                outcome = list_break(line, min(width, 3), bullet)
-                if outcome == "next":
-                    following = position
-                if outcome or previous_blank:
-                    break
-                content.append((line, line_base))
-            position += 1
+        width = match.end()
+        self.add(base + len(match.group(1)), base + width, "list_marker")
+        content, continue_width = item_first_line(text, base, width)
+        following, end = collect_item(lines, index + 1, content, (continue_width, width, bullet))
         while content and not content[-1][0].strip():
             content.pop()
         self.blocks(content, depth + 1)
-        return following, position
+        return following, end
+
+
+def item_first_line(text, base, width):
+    rest = text[width:]
+    if not rest.strip():
+        return [], width + 1
+    gap = indent_width(rest)
+    gap = 1 if gap >= 5 else gap
+    strip = min(gap, len(rest) - len(rest.lstrip(" \t")))
+    return [(rest[strip:], base + width + strip)], width + gap
+
+
+def collect_item(lines, position, content, shape):
+    continue_width, width, bullet = shape
+    started_blank = not content
+    previous_blank = False
+    while position < len(lines):
+        line, line_base = lines[position]
+        if BLANK.match(line):
+            content.append(("", line_base))
+            previous_blank = True
+        elif indent_width(line) >= continue_width:
+            if previous_blank and started_blank and not any(part.strip() for part, _ in content):
+                break
+            strip = columns_to_characters(line, continue_width)
+            content.append((line[strip:], line_base + strip))
+            previous_blank = False
+        else:
+            outcome = list_break(line, min(width, 3), bullet)
+            if outcome or previous_blank:
+                return (position if outcome == "next" else None), position
+            content.append((line, line_base))
+        position += 1
+    return None, position
+
+
+def html_block_end(lines, index, found, paragraph_open):
+    marker = found.group(1)
+    end_marker = HTML_END_MARKERS.get(marker) or (">" if marker.startswith("<!") else None)
+    if end_marker:
+        return after_marker(lines, index, end_marker, found.end())
+    closing = marker.startswith("</")
+    name = marker[2 if closing else 1:].lower()
+    if not closing and name in PRE_TAGS:
+        return after_marker(lines, index, "</" + name + ">", found.end())
+    if name in BLOCK_TAGS:
+        return until_blank(lines, index)
+    tail = CLOSE_TAG_END if closing else OPEN_TAG_END
+    if paragraph_open or tail.match(lines[index][0], found.end()) is None:
+        return None
+    return until_blank(lines, index)
+
+
+def after_marker(lines, index, marker, column):
+    end = index
+    position = lines[index][0].find(marker, column)
+    while position < 0 and end + 1 < len(lines):
+        end += 1
+        position = lines[end][0].find(marker)
+    return end + 1
+
+
+def until_blank(lines, index):
+    end = index + 1
+    while end < len(lines) and BLANK.match(lines[end][0]) is None:
+        end += 1
+    return end
 
 
 BLOCK_HANDLERS = {
