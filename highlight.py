@@ -1,6 +1,9 @@
 import re
+from array import array
 from bisect import bisect_left, bisect_right
-from functools import lru_cache
+from collections import OrderedDict
+from sys import getsizeof
+from threading import Lock
 from unicodedata import category
 
 from mistune.helpers import BLOCK_TAGS, HTML_ATTRIBUTES, HTML_TAGNAME, PRE_TAGS
@@ -31,8 +34,8 @@ TYPE_INDEX = {name: TOKEN_TYPES.index(style) for name, style in STYLE.items()}
 
 MAX_DEPTH = 8
 EMPHASIS_LOOKBACK = 50
-CACHE_ENTRIES = 8192
-CACHE_LIMIT = 4000
+CACHE_BUDGET = 16 * 1024 * 1024
+CACHE_ENTRY_OVERHEAD = 256
 WHITESPACE = " \r\n\t\f"
 ASCII_WHITESPACE = " \t\n\r\x0b\x0c"
 
@@ -1104,27 +1107,67 @@ def scan_entries(entries):
     return scanner, starts
 
 
-def scan_cell(body):
-    quotable = '"""' in body or "'''" in body
-    entries = body_entries(body.split("\n"), quotable)
-    if not entries:
-        return ()
-    scanner, starts = scan_entries(entries)
-    return tuple(convert_spans(flatten(scanner.spans), entries, starts))
+def encode_wire(tokens):
+    wire = array("i")
+    line = start = 0
+    for token_line, token_start, length, kind in tokens:
+        delta = token_line - line
+        wire.extend((delta, token_start if delta else token_start - start, length, kind, 0))
+        line, start = token_line, token_start
+    return wire, line, start
+
+
+EMPTY_CELL = (array("i"), 0, 0)
 
 
 def compute_cell(body):
     try:
-        return scan_cell(body)
+        quotable = '"""' in body or "'''" in body
+        entries = body_entries(body.split("\n"), quotable)
+        if not entries:
+            return EMPTY_CELL
+        scanner, starts = scan_entries(entries)
+        return encode_wire(convert_spans(flatten(scanner.spans), entries, starts))
     except Exception:
-        return ()
+        return EMPTY_CELL
 
 
-cached_cell = lru_cache(maxsize=CACHE_ENTRIES)(compute_cell)
+class CellCache:
+    def __init__(self, budget):
+        self.budget = budget
+        self.lock = Lock()
+        self.clear()
+
+    def clear(self):
+        self.entries = OrderedDict()
+        self.size = self.hits = self.misses = 0
+
+    def fetch(self, body):
+        with self.lock:
+            entry = self.entries.get(body)
+            if entry is not None:
+                self.entries.move_to_end(body)
+                self.hits += 1
+                return entry[0]
+            self.misses += 1
+        result = compute_cell(body)
+        self.store(body, result)
+        return result
+
+    def store(self, body, result):
+        cost = getsizeof(body) + getsizeof(result[0]) + CACHE_ENTRY_OVERHEAD
+        if cost > self.budget // 8:
+            return
+        with self.lock:
+            if body in self.entries:
+                return
+            self.entries[body] = (result, cost)
+            self.size += cost
+            while self.size > self.budget:
+                self.size -= self.entries.popitem(last=False)[1][1]
 
 
-def cell_tokens(body):
-    return cached_cell(body) if len(body) <= CACHE_LIMIT else compute_cell(body)
+CELL_CACHE = CellCache(CACHE_BUDGET)
 
 
 def markdown_math(markdown):
@@ -1145,11 +1188,15 @@ def semantic_tokens(text):
         data = []
         previous_line = previous_start = 0
         for first_line, body in markdown_bodies(text):
-            for line, start, length, kind in cell_tokens(body):
-                line += first_line
-                delta_line = line - previous_line
-                data.extend((delta_line, start if delta_line else start - previous_start, length, kind, 0))
-                previous_line, previous_start = line, start
+            wire, last_line, last_start = CELL_CACHE.fetch(body)
+            if not wire:
+                continue
+            begin = len(data)
+            data.extend(wire)
+            delta_line = first_line + wire[0] - previous_line
+            data[begin] = delta_line
+            data[begin + 1] = wire[1] if delta_line else wire[1] - previous_start
+            previous_line, previous_start = first_line + last_line, last_start
         return data
     except Exception:
         return []
