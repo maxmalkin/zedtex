@@ -71,9 +71,9 @@ QUOTE_NEEDS_MARKER = re.compile(r"[ \t\v\f]*$|(?: {4}| *\t).|(?: {0,3})(?:`{3,}|
 BLOCK_MATH = re.compile(BLOCK_MATH_PATTERN, re.M)
 MATH_OPENER = re.compile(r" {0,3}\$\$[ \t]*")
 MATH_CLOSER = re.compile(r"\$\$[ \t]*")
-REFERENCE = re.compile(
-    r" {0,3}\[((?:[^\\\[\]]|\\.){1,999})\]:[ \t]*(<[^<>]*>|[^\s<]\S*)"
-    r"(?:[ \t]+(?:\"[^\"]*\"|'[^']*'|\([^()]*\)))?[ \t]*$")
+REFERENCE_LABEL = re.compile(r" {0,3}\[((?:[^\\\[\]]|\\.){1,999})\]:")
+REFERENCE_TARGET = re.compile(
+    r"[ \t]*(<[^<>]*>|[^\s<]\S*)(?:[ \t]+(?:\"[^\"]*\"|'[^']*'|\([^()]*\)))?[ \t]*$")
 HTML_START = re.compile(r" {0,3}(</?" + HTML_TAGNAME + r"|<!--|<\?|<![A-Z]|<!\[CDATA\[)")
 BLOCK_HTML = re.compile(
     r" {0,3}(?:</?(?:" + "|".join(BLOCK_TAGS + PRE_TAGS) + r")(?:[ \t]+|$)|<!--|<\?|<![A-Z]|<!\[CDATA\[)")
@@ -927,12 +927,19 @@ class Scanner:
         text, base = lines[index]
         if paragraph or "]:" not in text:
             return None
-        found = REFERENCE.match(text)
-        if found is None:
+        label = REFERENCE_LABEL.match(text)
+        if label is None:
             return None
-        self.add(base + found.start(1), base + found.end(1), "link_text")
-        self.add(base + found.start(2), base + found.end(2), "link_url")
-        return index + 1
+        row = index if text[label.end():].strip() else index + 1
+        if row == len(lines):
+            return None
+        target_text, target_base = lines[row]
+        target = REFERENCE_TARGET.match(target_text, label.end() if row == index else 0)
+        if target is None:
+            return None
+        self.add(base + label.start(1), base + label.end(1), "link_text")
+        self.add(target_base + target.start(1), target_base + target.end(1), "link_url")
+        return row + 1
 
     def html(self, lines, index, paragraph, depth):
         found = HTML_START.match(lines[index][0])

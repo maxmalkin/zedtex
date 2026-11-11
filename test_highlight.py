@@ -257,6 +257,8 @@ class MarkdownTokenTests(unittest.TestCase):
     def test_autolinks_bare_urls_and_references(self):
         self.check("<https://a.b/c_d> https://e.f/g_h", [("https://a.b/c_d", "type"), ("https://e.f/g_h", "type")])
         self.check("[ref]: http://example.com \"t\"", [("ref", "function"), ("http://example.com", "type")])
+        self.check("[ref]:\nhttp://example.com\n*a*", [("ref", "function"), ("http://example.com", "type"),
+                                                       ("*a*", "parameter")])
 
     def test_unmatched_brackets_are_plain_text(self):
         self.check("[not a link] and [a](", [])
@@ -316,7 +318,7 @@ class MathParityTests(unittest.TestCase):
         "[a $x$](http://u/$y$)", "[a]($z$) $w$", "![i $x$](u) $y$", "[a] ($x$)", "[a](b) $x$", "[a\n$x$](u)",
         "http://x.y/$a$ $b$", "# Head $x$", "Setext $x$\n===", "## $x$ ##",
         "> $x$\n> $$\n> y\n> $$", "> $$x$$", "- $x$\n- $$\n  y\n  $$", "- item\n\n  $$\n  y\n  $$\n",
-        "1. $x$ and $$y$$", "> - $x$", "* $x$\n\n$$\ny\n$$", "-\ta\n\n    $x$ b", "-\ta\n\n\t$x$ b", "1.\t$x$\n\t$y$",
+        "1. $x$ and $$y$$", "> - $x$", "* $x$\n\n$$\ny\n$$", "[ref]:\n$x$", "[ref]:\n$x$\n\n$y$", "[ref]: <u>\n$x$", "para\n[ref]:\n$x$", "[ref]:\n\n$x$", "[ref]: u/$a$ \"t\"\n$x$", "-\ta\n\n    $x$ b", "-\ta\n\n\t$x$ b", "1.\t$x$\n\t$y$",
         "*a $x* y$*", "**$x$**", "_ $x$ _", "$a$$b$", "${}$", "~~$x$~~",
         "| a | b |\n|---|---|\n| $x$ | $y$ |",
         "$x$\n\n$$y$$\n\n$$\nz\n$$", "$$a\\$$b$$", "$$\\\nx$$",
