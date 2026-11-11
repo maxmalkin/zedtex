@@ -263,7 +263,7 @@ class ImageMarkdown(MarkdownRenderer):
         return "\n\n" + self.math_image(token, state, True) + "\n\n"
 
     def math_image(self, token, state, display):
-        return self.image({"attrs": {"url": self.render_image((token["raw"], display))},
+        return self.image({"type": "image", "attrs": {"url": self.render_image((token["raw"], display))},
                            "children": [{"type": "text", "raw": "equation"}]}, state)
 
     def image(self, token, state):

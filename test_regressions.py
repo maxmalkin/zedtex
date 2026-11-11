@@ -724,5 +724,11 @@ class ExportProcessRegressions(unittest.TestCase):
         self.assertEqual(len(str(error.exception)), 8000)
 
 
+class NotebookMarkdownRegressions(unittest.TestCase):
+    def test_equation_becomes_attachment_image(self):
+        text = renderer.convert_markdown("a $x$ b", Mock(directory=None), lambda equation: "attachment:x.png")
+        self.assertEqual(text.strip(), "a ![equation](attachment:x.png) b")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
