@@ -496,12 +496,16 @@ def export_notebook(source, kind, *, execute=True):
 
 def pdf_driver():
     from playwright._impl._driver import compute_driver_executable
-    node, cli = compute_driver_executable()
-    if not os.environ.get("PLAYWRIGHT_NODEJS_PATH") and not Path(node).is_file():
+    try:
+        node, cli = compute_driver_executable()
+    except Exception:
+        node = cli = None
+    if not os.environ.get("PLAYWRIGHT_NODEJS_PATH") and not (node and Path(node).is_file()):
         # Zed supplies this variable. Standalone CLI users can use Node on PATH.
         node = shutil.which("node")
         if node:
             os.environ["PLAYWRIGHT_NODEJS_PATH"] = node
+            cli = compute_driver_executable()[1]
     if not node or not Path(node).is_file():
         raise RuntimeError("PDF export needs Node.js 20 or newer. Reload ZedTeX to use Zed's shared runtime, "
                            "or set PLAYWRIGHT_NODEJS_PATH to a Node executable.")

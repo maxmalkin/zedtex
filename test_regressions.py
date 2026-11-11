@@ -680,6 +680,18 @@ class PdfRuntimeRegressions(unittest.TestCase):
             self.assertEqual(renderer.pdf_driver(), (str(self.node), "cli.js"))
         self.assertEqual(os.environ["PLAYWRIGHT_NODEJS_PATH"], str(self.node))
 
+    def test_standalone_cli_finds_node_when_playwright_has_none(self):
+        self.driver.side_effect = [RuntimeError("no bundled Node.js"), (str(self.node), "cli.js")]
+        with patch.object(renderer.shutil, "which", return_value=str(self.node)):
+            self.assertEqual(renderer.pdf_driver(), (str(self.node), "cli.js"))
+        self.assertEqual(os.environ["PLAYWRIGHT_NODEJS_PATH"], str(self.node))
+
+    def test_missing_node_error_survives_playwright_raising(self):
+        self.driver.side_effect = RuntimeError("no bundled Node.js")
+        with patch.object(renderer.shutil, "which", return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "Reload ZedTeX"):
+                renderer.pdf_driver()
+
     def test_source_install_can_use_playwrights_existing_node(self):
         self.driver.return_value = (str(self.node), "cli.js")
         with patch.object(renderer.shutil, "which") as which:
