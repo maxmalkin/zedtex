@@ -350,13 +350,13 @@ def indent_width(text, column=0):
     return column - start
 
 
-def columns_to_characters(text, columns):
+def strip_columns(text, columns):
     width = 0
     for index, char in enumerate(text):
         if width >= columns:
-            return index
+            return index, width - columns
         width += 1 if char == " " else 4 - width % 4
-    return len(text)
+    return len(text), max(0, width - columns)
 
 
 def closes_fence(text, char, size):
@@ -1054,8 +1054,8 @@ def collect_item(lines, position, content, shape):
         elif indent_width(line) >= continue_width:
             if previous_blank and started_blank and not any(part.strip() for part, _ in content):
                 break
-            strip = columns_to_characters(line, continue_width)
-            content.append((line[strip:], line_base + strip))
+            strip, extra = strip_columns(line, continue_width)
+            content.append((" " * extra + line[strip:], line_base + strip - extra))
             previous_blank = False
         else:
             outcome = list_break(line, min(width, 3), bullet)
