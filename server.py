@@ -1,5 +1,6 @@
 """Standard LSP code actions; rendering never runs on Zed's UI thread."""
 import asyncio
+import logging
 from pathlib import Path
 import subprocess
 import sys
@@ -9,8 +10,13 @@ from lsprotocol import types as lsp
 from pygls.lsp.server import LanguageServer
 from pygls.uris import to_fs_path
 
-import highlight
 import zed_latex as renderer
+
+try:
+    import highlight
+except Exception:
+    highlight = None
+    logging.getLogger(__name__).exception("Notebook highlighting is off because highlight failed to load")
 
 
 server = LanguageServer("ZedTeX", "0.2.0")
@@ -144,7 +150,6 @@ async def export_pdf(uri: str):
     await build(uri, "pdf")
 
 
-@server.feature(lsp.TEXT_DOCUMENT_SEMANTIC_TOKENS_FULL, lsp.SemanticTokensLegend(token_types=highlight.TOKEN_TYPES, token_modifiers=[]))
 async def semantic_tokens(params):
     try:
         uri = params.text_document.uri
@@ -155,6 +160,10 @@ async def semantic_tokens(params):
     except Exception:
         pass
     return lsp.SemanticTokens(data=[])
+
+
+if highlight is not None:
+    server.feature(lsp.TEXT_DOCUMENT_SEMANTIC_TOKENS_FULL, lsp.SemanticTokensLegend(token_types=highlight.TOKEN_TYPES, token_modifiers=[]))(semantic_tokens)
 
 
 @server.feature(lsp.TEXT_DOCUMENT_DID_SAVE)
